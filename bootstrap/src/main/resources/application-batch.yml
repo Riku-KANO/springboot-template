@@ -1,0 +1,47 @@
+# ============================================================================
+# batch プロファイル: settlementReconciliationJob をワンショットで実行するための追加プロファイル。
+# 単独では起動しない — 必ず local/dev/stg/prod のいずれかと組み合わせて有効化する
+# (DB 接続情報や AWS 認証情報はそちら側が提供するため)。
+#
+# 例: ./gradlew :bootstrap:bootRun --args='--spring.profiles.active=local,batch --spring.batch.job.name=settlementReconciliationJob settlementDate=2026-08-05'
+#
+# ##### JobParametersConverter の型トークン構文は不要 (実機で確認済み)
+# Spring Batch 6 の CLI 起動には型トークン付きの構文 (`key=value,type,identifying`) がある、
+# という情報が Chunk 5 から申し送られていたが、実際に上記コマンドで実機検証したところ、
+# 型トークンを一切付けない素の `settlementDate=2026-08-05` (非オプション引数) だけで
+# 正しく動作した。JobLauncherApplicationRunner はこれを type=java.lang.String の
+# JobParameter として登録するが、settlementRecordItemReader (@StepScope, SpEL
+# `#{jobParameters['settlementDate']}` で注入) 側で LocalDate 型のメソッド引数として
+# 受け取る際に、Spring の ConversionService (Boot が登録する ApplicationConversionService) が
+# String -> LocalDate の変換を自動的に行ってくれるため、型トークンなしでも実害が無い。
+# 実際に S3 の消込ファイルを読み込み、Postgres へ結果を書き込むところまで動作確認済み
+# (詳細はチャット越しの報告を参照)。そのため本テンプレートでは、composition root 側に
+# 独自の ApplicationRunner (JobParametersBuilder でジョブパラメータを組み立てるフォールバック案) を
+# 用意する必要が無いと判断した。
+# ============================================================================
+
+spring:
+  main:
+    # Web サーバー (Netty リスナー) を一切起動しない。バッチはジョブを実行したら終了する
+    # ワンショットのプロセスであり、HTTP ポートを開く必要がない。
+    web-application-type: none
+
+  batch:
+    job:
+      # application.yml の既定値 (false) を、このプロファイルでだけ true に戻す。
+      # 実行するジョブ名は --spring.batch.job.name=settlementReconciliationJob で指定する
+      # (Job Bean がこの1つしか無い場合は省略しても JobLauncherApplicationRunner が
+      # 自動的にそれを実行するが、複数ジョブが増えたときに備えて明示するのが安全)。
+      enabled: true
+
+  cloud:
+    aws:
+      sqs:
+        listener:
+          # :adapter-messaging の SettlementTaskListener (@SqsListener) はプロファイルを問わず
+          # コンポーネントスキャンで常に拾われるため、batch プロファイルでもリスナーコンテナが
+          # 起動してしまい、その非デーモンスレッドが原因で「ジョブ完走後も JVM が終了しない」
+          # (ワンショットで終わってほしいバッチプロセスの前提が崩れる) ことを実機で確認した。
+          # バッチプロファイルでは SQS リスナー自体を起動する意味が無い (Web も SQS 経由の
+          # ジョブ起動もしないワンショット実行なので) ため、ここで明示的に無効化する。
+          auto-startup: false

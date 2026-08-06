@@ -1,0 +1,117 @@
+{
+  "Comment": "Pattern B (本番運用のデフォルト): arn:aws:states:::ecs:runTask.waitForTaskToken で settlementReconciliationJob を Fargate 上のワンショットタスクとして起動する。タスク内の SettlementJobListener.afterJob が SendTaskSuccess/SendTaskFailure でこの待ち状態を閉じる。LocalStack Community は ECS をサポートしないため、このステートマシンはローカルでは検証できない (docker/docker-compose.yml の LocalStack が実際に使うのは Pattern A = settlement-reconciliation-sqs.asl.json の方であり、init-aws.sh が別途インライン定義した最小構成を使っている)。Terraform (infra/terraform/modules/sfn-state-machine) がこのファイルを templatefile() でレンダリングして apply する想定で、${...} はすべて Terraform の置換トークン。",
+  "StartAt": "StartSettlementBatchTask",
+  "States": {
+    "StartSettlementBatchTask": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::ecs:runTask.waitForTaskToken",
+      "Comment": "settlementDate は呼び出し側の実行入力 ({\"settlementDate\": \"yyyy-MM-dd\"})、taskToken は Step Functions がこの Task に対して発行するトークン。両方とも application-batch.yml が期待する非オプションのジョブパラメータ (settlementDate=..., taskToken=...) としてコマンドライン引数に埋め込む。",
+      "Parameters": {
+        "LaunchType": "FARGATE",
+        "Cluster": "${cluster_arn}",
+        "TaskDefinition": "${task_definition_arn}",
+        "NetworkConfiguration": {
+          "AwsvpcConfiguration": {
+            "Subnets": ["${private_subnet_id_1}", "${private_subnet_id_2}"],
+            "SecurityGroups": ["${ecs_task_security_group_id}"],
+            "AssignPublicIp": "DISABLED"
+          }
+        },
+        "Overrides": {
+          "ContainerOverrides": [
+            {
+              "Name": "${container_name}",
+              "Command.$": "States.Array('--spring.profiles.active=${spring_profiles}', '--spring.batch.job.name=settlementReconciliationJob', States.Format('settlementDate={}', $.settlementDate), States.Format('taskToken={}', $$.Task.Token))"
+            }
+          ]
+        }
+      },
+      "Retry": [
+        {
+          "Comment": "ECS/Fargate 側の一時的なキャパシティ不足やスロットリングだけをリトライ対象にする。ジョブそのものの失敗 (settlementReconciliationJob が FAILED で終わり SendTaskFailure が呼ばれるケース) はここでは拾わずそのまま Catch に落とす -- リトライしても消込ファイルの中身やドメインのデータ不整合は直らないため。",
+          "ErrorEquals": ["Ecs.AmazonECSException", "Ecs.LimitExceededException", "States.Timeout"],
+          "IntervalSeconds": 15,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "NotifyLaunchFailure"
+        }
+      ],
+      "TimeoutSeconds": 3600,
+      "Next": "EvaluateSettlementVerdict"
+    },
+    "NotifyLaunchFailure": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Comment": "RunTask 自体の起動に失敗した (タスクが一度も実行されなかった) ケース。settlementReconciliationJob が完走した上での失敗 (failedCount > 0) とは区別して通知する。",
+      "Parameters": {
+        "TopicArn": "${sns_topic_arn}",
+        "Subject": "[settlement-batch] task launch failed",
+        "Message.$": "States.Format('settlement reconciliation task failed to launch for settlementDate={}: {}', $.settlementDate, $.error)"
+      },
+      "Next": "SettlementBatchFailed"
+    },
+    "SettlementBatchFailed": {
+      "Type": "Fail",
+      "Error": "SettlementBatchLaunchFailed",
+      "Cause": "settlementReconciliationJob task did not run to completion"
+    },
+    "EvaluateSettlementVerdict": {
+      "Type": "Choice",
+      "Comment": "SettlementReport.verdict (application/settlement/SettlementReport.kt) は sealed interface なので JSON 上は型タグを持たない (MatchedAll={}, HasDiscrepancies={mismatchCount}, Failed={failedCount})。ここでは verdict の中身を見るのではなく、verdict 自身が計算に使っているのと同じ2つのフラットなフィールド (failedCount / mismatchCount, かつ failedCount 優先) を直接見て分岐する方が、ネストしたオブジェクトの形をパターンマッチするより頑健。",
+      "Choices": [
+        {
+          "Variable": "$.failedCount",
+          "NumericGreaterThan": 0,
+          "Next": "NotifySettlementFailures"
+        },
+        {
+          "Variable": "$.mismatchCount",
+          "NumericGreaterThan": 0,
+          "Next": "NotifySettlementDiscrepancies"
+        }
+      ],
+      "Default": "SettlementMatchedAll"
+    },
+    "NotifySettlementFailures": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Comment": "消込処理自体が1件以上失敗した (注文が見つからない/インフラ障害等)。原因調査が必要 -- docs/runbooks/settlement-batch.md 参照。",
+      "Parameters": {
+        "TopicArn": "${sns_topic_arn}",
+        "Subject": "[settlement-batch] reconciliation had failures",
+        "Message.$": "States.Format('settlement reconciliation for {} finished with {} failed record(s) out of {}. Investigate batch_settlement_errors.', $.processedAt, $.failedCount, $.totalCount)"
+      },
+      "Next": "SettlementHadFailures"
+    },
+    "SettlementHadFailures": {
+      "Type": "Fail",
+      "Error": "SettlementReconciliationHadFailures",
+      "Cause": "one or more settlement records failed to reconcile; see batch_settlement_errors"
+    },
+    "NotifySettlementDiscrepancies": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Comment": "失敗ではないが金額不一致がある。バッチ自体は正常終了扱いとし、人手確認フローに回すための通知のみ行う。",
+      "Parameters": {
+        "TopicArn": "${sns_topic_arn}",
+        "Subject": "[settlement-batch] amount mismatches detected",
+        "Message.$": "States.Format('settlement reconciliation for {} finished with {} amount mismatch(es) out of {}. Manual review required.', $.processedAt, $.mismatchCount, $.totalCount)"
+      },
+      "Next": "SettlementHasDiscrepancies"
+    },
+    "SettlementHasDiscrepancies": {
+      "Type": "Succeed",
+      "Comment": "バッチジョブとしては正常終了 (BatchStatus.COMPLETED)。金額不一致の中身は batch_settlement_results テーブルで確認する。"
+    },
+    "SettlementMatchedAll": {
+      "Type": "Succeed",
+      "Comment": "failedCount = 0 かつ mismatchCount = 0。全件突合完了。"
+    }
+  }
+}

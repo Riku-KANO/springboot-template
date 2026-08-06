@@ -1,0 +1,100 @@
+{
+  "Comment": "Pattern A (このテンプレートが実際にローカルで動かしている構成と同じ形): arn:aws:states:::sqs:sendMessage.waitForTaskToken で SQS にタスクトークン付きメッセージを送り、常駐している長時間稼働の API サービス側の SettlementTaskListener (@SqsListener) が settlementReconciliationJob を起動する。ジョブ完了後は SettlementJobListener.afterJob が SendTaskSuccess/SendTaskFailure でこの待ち状態を閉じる。docker/docker-compose.yml 経由の LocalStack はこのパターンの最小構成 (docker/localstack-init/init-aws.sh が自己完結的にインライン定義したもの、SNS 通知や Retry/Catch/Choice は持たない) を実際に作成・実行しており、SUCCEEDED まで到達することを実機で確認済み。このファイルはその本番相当版 (通知・リトライ・分岐込み) であり、Terraform (infra/terraform/modules/sfn-state-machine) が templatefile() でレンダリングする。ECS RunTask (Pattern B, settlement-reconciliation.asl.json) の代わりにこちらを選ぶ場合に envs/*/main.tf 側で切り替える。",
+  "StartAt": "SendSettlementTaskMessage",
+  "States": {
+    "SendSettlementTaskMessage": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sqs:sendMessage.waitForTaskToken",
+      "Comment": "MessageBody は adapter-messaging の SettlementTaskListener.SettlementTaskMessage (settlementDate, taskToken) と同じ形の JSON でなければならない。",
+      "Parameters": {
+        "QueueUrl": "${sqs_queue_url}",
+        "MessageBody": {
+          "settlementDate.$": "$.settlementDate",
+          "taskToken.$": "$$.Task.Token"
+        }
+      },
+      "Retry": [
+        {
+          "Comment": "SQS への送信自体が一時的に失敗した場合のみリトライする (ジョブの実行結果とは無関係)。",
+          "ErrorEquals": ["SQS.SdkClientException"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "NotifyLaunchFailure"
+        }
+      ],
+      "TimeoutSeconds": 3600,
+      "Next": "EvaluateSettlementVerdict"
+    },
+    "NotifyLaunchFailure": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Comment": "SettlementTaskListener.reportLaunchFailure (JobOperator.start 自体が例外を投げたケース) か、SQS 送信自体の失敗のどちらか。ジョブが完走した上での失敗 (failedCount > 0) とは区別する。",
+      "Parameters": {
+        "TopicArn": "${sns_topic_arn}",
+        "Subject": "[settlement-batch] task launch failed",
+        "Message.$": "States.Format('settlement reconciliation task failed to launch for settlementDate={}: {}', $.settlementDate, $.error)"
+      },
+      "Next": "SettlementBatchFailed"
+    },
+    "SettlementBatchFailed": {
+      "Type": "Fail",
+      "Error": "SettlementBatchLaunchFailed",
+      "Cause": "settlementReconciliationJob did not run to completion"
+    },
+    "EvaluateSettlementVerdict": {
+      "Type": "Choice",
+      "Comment": "SettlementReport.verdict は sealed interface で JSON 上は型タグを持たない (MatchedAll={}, HasDiscrepancies={mismatchCount}, Failed={failedCount}) ため、verdict 自身の判定ロジックと同じ2つのフラットなフィールドを直接見て分岐する (settlement-reconciliation.asl.json と同じ設計)。",
+      "Choices": [
+        {
+          "Variable": "$.failedCount",
+          "NumericGreaterThan": 0,
+          "Next": "NotifySettlementFailures"
+        },
+        {
+          "Variable": "$.mismatchCount",
+          "NumericGreaterThan": 0,
+          "Next": "NotifySettlementDiscrepancies"
+        }
+      ],
+      "Default": "SettlementMatchedAll"
+    },
+    "NotifySettlementFailures": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "${sns_topic_arn}",
+        "Subject": "[settlement-batch] reconciliation had failures",
+        "Message.$": "States.Format('settlement reconciliation for {} finished with {} failed record(s) out of {}. Investigate batch_settlement_errors.', $.processedAt, $.failedCount, $.totalCount)"
+      },
+      "Next": "SettlementHadFailures"
+    },
+    "SettlementHadFailures": {
+      "Type": "Fail",
+      "Error": "SettlementReconciliationHadFailures",
+      "Cause": "one or more settlement records failed to reconcile; see batch_settlement_errors"
+    },
+    "NotifySettlementDiscrepancies": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "${sns_topic_arn}",
+        "Subject": "[settlement-batch] amount mismatches detected",
+        "Message.$": "States.Format('settlement reconciliation for {} finished with {} amount mismatch(es) out of {}. Manual review required.', $.processedAt, $.mismatchCount, $.totalCount)"
+      },
+      "Next": "SettlementHasDiscrepancies"
+    },
+    "SettlementHasDiscrepancies": {
+      "Type": "Succeed"
+    },
+    "SettlementMatchedAll": {
+      "Type": "Succeed"
+    }
+  }
+}

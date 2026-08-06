@@ -1,0 +1,72 @@
+# ============================================================================
+# CI: ビルド・テスト・静的解析。
+#
+# ubuntu-latest には Docker Engine がプリインストールされているため、Testcontainers
+# (Postgres, LocalStack) を使う統合テストもそのまま実行できる (追加の Docker セットアップ手順は
+# 不要)。detekt には一切触れない -- build-logic/build.gradle.kts が明示する通り、
+# detekt 1.23.8 は Kotlin 2.3.21 と非互換のためこのプロジェクトに存在しない
+# (静的解析は ktlint + spotless のみ)。
+# ============================================================================
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  build:
+    name: build & test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          # main への push 時だけキャッシュを書き込む。PR 側は読み取り専用にして
+          # フォーク PR からのキャッシュ汚染を避ける (Gradle 公式アクションの推奨設定)。
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+
+      - name: gradlew build (全モジュールのコンパイル + テスト。Testcontainers 統合テスト込み)
+        run: ./gradlew build --stacktrace
+
+      - name: ktlintCheck / spotlessCheck
+        run: ./gradlew ktlintCheck spotlessCheck --stacktrace
+
+      - name: Publish test report
+        # ビルドやテストが失敗した場合でもレポートは必ず публish する。
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: JUnit tests (domain/application/adapter-*/batch/bootstrap)
+          path: "**/build/test-results/test/TEST-*.xml"
+          reporter: java-junit
+          fail-on-error: false
+
+      - name: Upload test/lint reports (HTML)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-reports
+          path: |
+            **/build/reports/tests/
+            **/build/reports/ktlint/
+            **/build/reports/spotless/
+          retention-days: 14
+          if-no-files-found: ignore

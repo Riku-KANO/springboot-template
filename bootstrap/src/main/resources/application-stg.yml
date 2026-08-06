@@ -1,0 +1,53 @@
+# ============================================================================
+# stg プロファイル: 本番相当 (prod-shaped) のステージング環境。実際の AWS (stg アカウント) +
+# 実際の stg IdP に接続する。dev との主な違いは、スキーマ変更を「起動時の自動適用」ではなく
+# 「デプロイパイプライン内の専用ステップ」で適用する点 (prod と同じ運用を先取りして検証するため)。
+#
+# dev 同様、ここに書く値はすべて置き換え前提のプレースホルダ。
+# ============================================================================
+
+spring:
+  config:
+    import:
+      - "aws-parameterstore:/template/stg/"
+      - "aws-secretsmanager:template/stg/db-credentials"
+
+  datasource:
+    url: jdbc:postgresql://template-stg.example.internal:5432/template
+    username: template
+    password: template
+  r2dbc:
+    url: r2dbc:postgresql://template-stg.example.internal:5432/template
+    username: template
+    password: template
+
+  flyway:
+    enabled: false # stg 以降は起動時マイグレーションをやめ、CI/CD の専用デプロイステップで flyway migrate を実行する
+
+  cloud:
+    aws:
+      region:
+        static: ap-northeast-1
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: https://stg-idp.example.com/realms/template
+
+settlement:
+  s3:
+    bucket-name: template-settlements-stg
+  sqs:
+    queue-name: template-settlement-tasks-stg
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+logging:
+  structured:
+    format:
+      console: ecs

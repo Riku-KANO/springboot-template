@@ -1,0 +1,94 @@
+# ============================================================================
+# infra/** を変更する PR に対して fmt/init/validate/plan を実行する。
+#
+# plan は実際の AWS 環境に対する読み取り専用の差分確認だが、OIDC ロール
+# (infra/terraform/modules/iam の github_actions_role_arn) が未ブートストラップの
+# 状態 (テンプレートを初めて clone した直後等) では認証情報が無く実行できない。
+# fmt/init/validate はどの状態でも常に実行し、plan だけは
+# AWS_GITHUB_ACTIONS_ROLE_ARN リポジトリ変数が設定されている場合のみ実行する
+# (docs/how-to-use-this-template.md の OIDC ブートストラップ手順を参照)。
+# ============================================================================
+name: Terraform Plan
+
+on:
+  pull_request:
+    paths:
+      - "infra/terraform/**"
+      - ".github/workflows/terraform-plan.yml"
+
+concurrency:
+  group: terraform-plan-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+env:
+  TF_VERSION: "1.14.3"
+
+jobs:
+  fmt-validate:
+    name: fmt & validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: terraform fmt -check (全体)
+        working-directory: infra/terraform
+        run: terraform fmt -check -recursive
+
+      - name: terraform init -backend=false / validate (envs/dev,stg,prod)
+        run: |
+          set -euo pipefail
+          for env in dev stg prod; do
+            echo "::group::envs/${env}"
+            (cd "infra/terraform/envs/${env}" && terraform init -backend=false -input=false && terraform validate)
+            echo "::endgroup::"
+          done
+
+  plan:
+    name: plan
+    needs: fmt-validate
+    runs-on: ubuntu-latest
+    if: vars.AWS_GITHUB_ACTIONS_ROLE_ARN != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [dev, stg, prod]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: terraform init (実バックエンドあり)
+        working-directory: infra/terraform/envs/${{ matrix.env }}
+        run: terraform init -input=false
+
+      - name: terraform plan
+        working-directory: infra/terraform/envs/${{ matrix.env }}
+        run: terraform plan -input=false -no-color -out=tfplan
+
+      - name: Upload plan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ matrix.env }}
+          path: infra/terraform/envs/${{ matrix.env }}/tfplan
+          retention-days: 14

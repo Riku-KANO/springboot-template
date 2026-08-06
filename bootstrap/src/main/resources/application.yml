@@ -1,0 +1,46 @@
+# ============================================================================
+# 全プロファイル共通のデフォルト設定。
+#
+# 環境固有の値 (DB 接続情報、AWS 認証情報、IdP のエンドポイント等) はここには一切書かず、
+# application-{profile}.yml (local/dev/stg/prod/batch) 側で必ず明示的に設定する。
+# ============================================================================
+
+spring:
+  application:
+    name: springboot-template
+
+  batch:
+    job:
+      # JobLauncherApplicationRunner (org.springframework.boot.batch.autoconfigure) は
+      # デフォルトで有効 (true) であり、コンテキスト起動のたびに登録済みの Job Bean
+      # (settlementReconciliationJob) を自動実行しようとする。通常の Web サーバー起動時に
+      # バッチが暴発しては困るため、既定値では明示的に無効化し、application-batch.yml
+      # (バッチ専用プロファイル。--spring.profiles.active=<env>,batch のように組み合わせて使う)
+      # でだけ true に戻す。
+      enabled: false
+
+  # Jackson 3 (tools.jackson.*) では日時のシリアライズ方式は SerializationFeature ではなく
+  # 専用の DatetimeFeature (spring.jackson.datetime.*) に分離されている。実機で
+  # spring.jackson.serialization.write-dates-as-timestamps を試したところ、Jackson 3 の
+  # SerializationFeature にはそもそも WRITE_DATES_AS_TIMESTAMPS という定数自体が存在せず
+  # (エラーメッセージが提示する有効な定数一覧に含まれていないことを実機で確認済み)、
+  # バインドエラーで起動に失敗した。java.time.Instant 等は Jackson 3 +
+  # jackson-module-kotlin + JavaTimeModule (Boot が自動構成する) の既定で既に ISO-8601 文字列
+  # シリアライズになっているため、ここでは何も上書きしない。
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # health/info のみを公開する既定値。prod ではさらに絞る (application-prod.yml 参照)。
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        enabled: true
+
+logging:
+  level:
+    root: INFO
+    com.example.template: INFO

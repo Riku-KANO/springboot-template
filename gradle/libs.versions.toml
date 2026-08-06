@@ -1,0 +1,97 @@
+
+# ============================================================================
+# バージョンカタログ (Version Catalog)
+#
+# このプロジェクトで使用する全てのバージョンは、このファイルに一元管理する。
+# build-logic (Gradle 複合ビルド) からも ../gradle/libs.versions.toml として
+# 同じカタログを参照するため、「バージョンの単一情報源(Single Source of Truth)」
+# として機能する。
+#
+# 注意: Spring Boot 4.1.0 の BOM (spring-boot-dependencies) が管理下に置く
+# ライブラリ(spring-boot-starter-*, jackson, flyway, micrometer 等)は、
+# spring-library / spring-application 系のモジュールではバージョン指定なしで
+# 解決される。ただし :domain / :application は Spring 依存ゼロが要件のため、
+# 共通テスト依存 (junit-jupiter, kotlinx-coroutines-test) は Spring BOM に
+# 頼らず、JUnit BOM および明示バージョン指定で解決する
+# (Spring Boot 4.1.0 の管理バージョンと意図的に揃えてある)。
+# ============================================================================
+
+[versions]
+kotlin = "2.3.21" # Spring Boot 4.1.0 が管理する kotlin.version と一致させる
+springBoot = "4.1.0"
+springDependencyManagement = "1.1.7"
+arrow = "2.2.2" # 2.2.3 は Kotlin 2.4.0 前提でビルドされておりKSPと噛み合わないため禁止
+ksp = "2.3.11"
+springCloudAws = "4.1.0"
+awsSdk = "2.51.0"
+springdoc = "3.1.0"
+r2dbcPostgresql = "1.1.2.RELEASE"
+testcontainers = "2.0.5"
+mockk = "1.14.11"
+kotestProperty = "6.2.3" # ライブラリとしてのみ使用 (Arb/checkAll)。テストランナーではない
+detekt = "1.23.8" # 導入を試みたが不採用 (理由は下記 [libraries] の detekt-gradle-plugin コメントと build-logic/build.gradle.kts 冒頭コメントを参照)
+ktlintPlugin = "14.2.0"
+spotless = "8.9.0"
+
+# Spring Boot BOM とは独立して揃えておく必要があるテスト系バージョン
+# (:domain / :application は Spring BOM を一切導入しないため)
+junitBom = "6.0.3" # Spring Boot 4.1.0 が管理する junit-jupiter と同一バージョン
+kotlinxCoroutines = "1.10.2" # Spring Boot 4.1.0 が管理する kotlinx-coroutines と同一バージョン
+
+[libraries]
+# --- build-logic (precompiled script plugins) が implementation として使うプラグイン本体 ---
+kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
+kotlin-allopen = { module = "org.jetbrains.kotlin:kotlin-allopen", version.ref = "kotlin" }
+spring-boot-gradle-plugin = { module = "org.springframework.boot:spring-boot-gradle-plugin", version.ref = "springBoot" }
+spring-dependency-management-plugin = { module = "io.spring.gradle:dependency-management-plugin", version.ref = "springDependencyManagement" }
+ksp-gradle-plugin = { module = "com.google.devtools.ksp:symbol-processing-gradle-plugin", version.ref = "ksp" }
+ktlint-gradle-plugin = { module = "org.jlleitschuh.gradle:ktlint-gradle", version.ref = "ktlintPlugin" }
+spotless-gradle-plugin = { module = "com.diffplug.spotless:spotless-plugin-gradle", version.ref = "spotless" }
+# detekt-gradle-plugin: 実際に build-logic に組み込んで検証した結果、
+# 「detekt was compiled with Kotlin 2.0.21 but is currently running with 2.3.21.
+#  This is not supported.」というハードエラーが spring-library 系の全モジュールで発生し、
+# 設定変更では回避不能だったため不採用とした (ktlint_official code style や
+# allRules=false 等の設定問題ではなく、detekt 1.23.8 が内部にバンドルする Kotlin
+# コンパイラフロントエンドが 2.3.21 と非互換であることが根本原因)。
+# ktlint + spotless のみで静的解析を運用する。バージョンだけ記録として残す。
+detekt-gradle-plugin = { module = "io.gitlab.arturbosch.detekt:detekt-gradle-plugin", version.ref = "detekt" }
+
+# --- Arrow (:domain, :application 等の pure モジュール向け) ---
+arrow-bom = { module = "io.arrow-kt:arrow-stack", version.ref = "arrow" }
+arrow-core = { module = "io.arrow-kt:arrow-core" } # バージョンは arrow-bom が管理
+arrow-fx-coroutines = { module = "io.arrow-kt:arrow-fx-coroutines" } # バージョンは arrow-bom が管理
+arrow-optics = { module = "io.arrow-kt:arrow-optics" } # バージョンは arrow-bom が管理
+arrow-optics-ksp-plugin = { module = "io.arrow-kt:arrow-optics-ksp-plugin", version.ref = "arrow" }
+
+# --- Spring 系 (adapter-*, batch, bootstrap 向け。後続チャンクで実際に利用) ---
+spring-cloud-aws-bom = { module = "io.awspring.cloud:spring-cloud-aws-dependencies", version.ref = "springCloudAws" }
+aws-sdk-bom = { module = "software.amazon.awssdk:bom", version.ref = "awsSdk" }
+springdoc-openapi-starter-webflux-ui = { module = "org.springdoc:springdoc-openapi-starter-webflux-ui", version.ref = "springdoc" }
+r2dbc-postgresql = { module = "org.postgresql:r2dbc-postgresql", version.ref = "r2dbcPostgresql" }
+
+# --- Jackson 3 (グループが tools.jackson.* に変更されている点に注意。Spring Boot BOM 管理) ---
+jackson-module-kotlin = { module = "tools.jackson.module:jackson-module-kotlin" }
+
+# --- テスト共通 (template.kotlin-common で全モジュールに適用) ---
+junit-bom = { module = "org.junit:junit-bom", version.ref = "junitBom" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" } # バージョンは junit-bom が管理
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" } # バージョンは junit-bom が管理
+mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
+kotest-property = { module = "io.kotest:kotest-property", version.ref = "kotestProperty" }
+kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinxCoroutines" }
+
+# --- Testcontainers 2.x (モジュール名変更に注意。本チャンクではカタログ登録のみ) ---
+testcontainers-postgresql = { module = "org.testcontainers:testcontainers-postgresql", version.ref = "testcontainers" }
+testcontainers-localstack = { module = "org.testcontainers:testcontainers-localstack", version.ref = "testcontainers" }
+testcontainers-junit-jupiter = { module = "org.testcontainers:testcontainers-junit-jupiter", version.ref = "testcontainers" }
+
+[plugins]
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+kotlin-plugin-spring = { id = "org.jetbrains.kotlin.plugin.spring", version.ref = "kotlin" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+spring-boot = { id = "org.springframework.boot", version.ref = "springBoot" }
+spring-dependency-management = { id = "io.spring.dependency-management", version.ref = "springDependencyManagement" }
+ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlintPlugin" }
+spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }
+# detekt: build-logic では未適用 (不採用の経緯は上記 detekt-gradle-plugin のコメントを参照)
+detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }

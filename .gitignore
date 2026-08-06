@@ -1,0 +1,47 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
+
+# build-logic は複合ビルドとして独自の .gradle / build を持つ
+build-logic/.gradle/
+build-logic/build/
+
+# Kotlin / Java
+*.class
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+out/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# ログ・一時ファイル
+*.log
+.kotlin/
+
+# Terraform
+# .terraform/ はプロバイダのキャッシュなので追跡しない。
+# 一方 .terraform.lock.hcl はプロバイダのバージョンを固定する重要なファイルなので
+# 必ずコミットする (= ここで除外しない)。
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+# tfvars は環境ごとの設定値。本テンプレートでは機密を含まない前提でコミットするが、
+# 秘匿値を入れる運用に変えた場合はここのコメントアウトを外すこと。
+# *.tfvars
+*.tfvars.local
+override.tf
+override_*.tf

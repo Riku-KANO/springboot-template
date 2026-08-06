@@ -1,0 +1,64 @@
+# ============================================================================
+# prod プロファイル: 実際の AWS (本番アカウント) + 実際の本番 IdP に接続する。
+# actuator を厳格にロックダウンし、トレースのサンプリング率を下げる。
+#
+# dev/stg 同様、ここに書く値はすべて置き換え前提のプレースホルダ。
+# ============================================================================
+
+spring:
+  config:
+    import:
+      - "aws-parameterstore:/template/prod/"
+      - "aws-secretsmanager:template/prod/db-credentials"
+
+  datasource:
+    url: jdbc:postgresql://template-prod.example.internal:5432/template
+    username: template
+    password: template
+  r2dbc:
+    url: r2dbc:postgresql://template-prod.example.internal:5432/template
+    username: template
+    password: template
+
+  flyway:
+    enabled: false # 本番は必ず CI/CD の専用デプロイステップで flyway migrate を実行し、起動時には適用しない
+
+  cloud:
+    aws:
+      region:
+        static: ap-northeast-1
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: https://idp.example.com/realms/template
+
+settlement:
+  s3:
+    bucket-name: template-settlements-prod
+  sqs:
+    queue-name: template-settlement-tasks-prod
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health # info すら公開しない。actuator を厳格にロックダウンする
+  endpoint:
+    health:
+      show-details: never # 認証済みであっても内部構成の詳細 (DB URL 等) を露出させない
+  tracing:
+    sampling:
+      # 本番はトレースのサンプリング率を下げる。ただし本テンプレートは実際のトレーサー実装
+      # (micrometer-tracing-bridge-otel 等) を導入していないため、このプロパティは
+      # 将来トレーシングを追加する際の設定場所を示すプレースホルダに留まる。
+      probability: 0.1
+
+logging:
+  structured:
+    format:
+      console: ecs
+  level:
+    root: WARN
+    com.example.template: INFO

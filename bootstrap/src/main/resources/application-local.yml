@@ -1,0 +1,74 @@
+# ============================================================================
+# local プロファイル: `docker compose -f docker/docker-compose.yml up -d` (Postgres + LocalStack)
+# だけで完結するローカル開発環境。実際の AWS アカウント・実際の IdP への疎通は一切要求しない。
+#
+# 起動例:
+#   ./gradlew :bootstrap:bootRun --args='--spring.profiles.active=local'
+# ============================================================================
+
+spring:
+  # JDBC (Flyway のマイグレーション、Spring Batch 6 の JobRepository が使う)。
+  datasource:
+    url: jdbc:postgresql://localhost:5432/template
+    username: template
+    password: template
+
+  # R2DBC (アプリの実行時クエリ経路)。JDBC と同じ Postgres インスタンスを指す
+  # (デュアル DataSource/ConnectionFactory 構成。config/R2dbcTransactionConfig.kt のコメント参照)。
+  r2dbc:
+    url: r2dbc:postgresql://localhost:5432/template
+    username: template
+    password: template
+
+  flyway:
+    enabled: true # local は起動時に自動でマイグレーションを適用する (dev も同様、stg/prod は別デプロイ工程)
+
+  cloud:
+    aws:
+      region:
+        static: us-east-1
+      credentials:
+        access-key: test # LocalStack はどんな値でも認証を通す。AWS CLI の慣例に合わせただけのダミー値
+        secret-key: test
+      endpoint: http://localhost:4566 # 未指定のサービスに適用されるグローバルなエンドポイント上書き (SfnAsyncClient 用)
+      s3:
+        endpoint: http://localhost:4566
+        path-style-access-enabled: true # LocalStack の S3 はパススタイルアクセスが必要
+      sqs:
+        endpoint: http://localhost:4566
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # 実際の IdP には一切疎通しない。NimbusReactiveJwtDecoder.withJwkSetUri(...) は
+          # Bean 生成時点では JWKS をフェッチしないため、到達不能なダミー URI でも
+          # adapter-web の SecurityConfig の Bean 生成自体は成功する
+          # (adapter-web/src/test/.../SecurityConfigTest.kt が既に実証済みの挙動)。
+          jwk-set-uri: https://local-idp.invalid/.well-known/jwks.json
+
+# ローカルでは実際の JWT を発行できないため、adapter-web の JWT 認可より優先度の高い
+# permitAll チェインに切り替える (config/LocalSecurityConfig.kt 参照)。dev/stg/prod では
+# このプロパティ自体を設定しないこと。
+template:
+  security:
+    permit-all: true
+
+# アプリ独自の必須プロパティ。値は docker/localstack-init/init-aws.sh が実際に作成するものと
+# 一致させている。
+settlement:
+  s3:
+    bucket-name: template-settlements-local
+    key-prefix: settlements
+  sqs:
+    queue-name: template-settlement-tasks-local
+
+# logging.structured.format.console を設定しない = Boot 既定のプレーンテキストログのまま
+# (ローカルでの可読性を優先する。JSON 構造化ログは dev 以降で使う)。
+# dev 以降の JSON 構造化ログは MDC の全キーを自動でフィールド化してくれるが、プレーンテキストの
+# 既定パターンは MDC の中身を一切出力しない。requestId (adapter-web の RequestIdWebFilter が
+# MDC へ積む相関 ID) が実際にログへ伝播していることをローカルでも目視確認できるよう、
+# コンソール出力パターンにだけ %X{requestId} を追加する (Definition of Done のログ確認用)。
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %5p [requestId=%X{requestId}] --- [%15.15t] %-40.40logger{39} : %m%n%wEx"

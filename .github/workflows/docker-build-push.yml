@@ -1,0 +1,82 @@
+# ============================================================================
+# main へのマージ時に :bootstrap の bootJar を Cloud Native Buildpacks (bootBuildImage、
+# Dockerfile レス) でコンテナイメージ化し、OIDC 経由で ECR へ push する。
+#
+# ##### 鶏と卵問題 (このワークフローを初めて動かす前に必ず読むこと)
+# このワークフローは infra/terraform/modules/iam が作る github_actions_role_arn を
+# `aws-actions/configure-aws-credentials` で assume する。つまり:
+#   1. まず infra/terraform/envs/<env> を「人手 (ローカルの AWS 認証情報、あるいは管理者ロール) で」
+#      terraform apply し、GitHub OIDC プロバイダ + github_actions_role_arn を作る
+#      (このロール自体を、まだ存在しないこのロールを使う CI から作ることはできない)。
+#   2. 出力された github_actions_role_arn / ECR リポジトリ URL / リージョンを、このリポジトリの
+#      Settings > Secrets and variables > Actions > Variables に
+#      AWS_GITHUB_ACTIONS_ROLE_ARN / ECR_REPOSITORY_URL / AWS_REGION として登録する。
+#   3. ここで初めてこのワークフローが動く。
+# 詳細な手順は docs/how-to-use-this-template.md の「OIDC ブートストラップ」を参照。
+#
+# ##### ECR タグの可変性について
+# infra/terraform/modules/ecr は stg/prod を IMMUTABLE (同一タグへの再 push を拒否) に
+# している一方、このワークフローは "latest" にも push する。dev 環境の ECR (MUTABLE) を
+# 対象にする分には問題ないが、IMMUTABLE な stg/prod の ECR リポジトリへ直接このワークフローで
+# push すると2回目以降 "latest" タグの push が失敗する。stg/prod への昇格 (特定の git sha
+# タグを選んで ECS のタスク定義を更新する) は本テンプレートの範囲外の、別のデプロイ
+# ワークフローとして用意すること (このテンプレートはビルド~ECR push までしか自動化しない)。
+# ============================================================================
+name: Docker Build & Push
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: docker-build-push-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # OIDC (aws-actions/configure-aws-credentials) に必須
+
+jobs:
+  build-and-push:
+    name: bootBuildImage & push to ECR
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Compute image tags
+        id: tags
+        run: |
+          SHA_TAG="${GITHUB_SHA::12}"
+          echo "sha_tag=${SHA_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: bootBuildImage (Cloud Native Buildpacks, Dockerfile レス)
+        run: |
+          ./gradlew :bootstrap:bootBuildImage \
+            --imageName="${{ vars.ECR_REPOSITORY_URL }}:${{ steps.tags.outputs.sha_tag }}" \
+            --stacktrace
+
+      - name: Tag & push (git sha + latest)
+        run: |
+          docker tag "${{ vars.ECR_REPOSITORY_URL }}:${{ steps.tags.outputs.sha_tag }}" "${{ vars.ECR_REPOSITORY_URL }}:latest"
+          docker push "${{ vars.ECR_REPOSITORY_URL }}:${{ steps.tags.outputs.sha_tag }}"
+          docker push "${{ vars.ECR_REPOSITORY_URL }}:latest"

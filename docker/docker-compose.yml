@@ -1,0 +1,56 @@
+# ============================================================================
+# ローカル開発環境: PostgreSQL (JDBC/R2DBC 両経路の実体) + LocalStack (S3/SQS/Step Functions/
+# STS/IAM/SSM/Secrets Manager) の2サービスだけで、:bootstrap を丸ごとローカルで動かせる。
+#
+# 使い方:
+#   docker compose -f docker/docker-compose.yml up -d
+#   ./gradlew :bootstrap:bootRun --args='--spring.profiles.active=local'
+#   docker compose -f docker/docker-compose.yml down -v   # 後片付け (ボリュームも削除)
+# ============================================================================
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: template-postgres
+    environment:
+      POSTGRES_DB: template
+      POSTGRES_USER: template
+      POSTGRES_PASSWORD: template
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U template -d template"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  localstack:
+    image: localstack/localstack:4.9
+    container_name: template-localstack
+    environment:
+      # sts / iam が無いと aws-sdk:sqs:sendMessage.waitForTaskToken の Step Functions 統合が
+      # 内部的な認証情報解決に失敗し "Service 'sts' is not enabled" で実行が即座に FAILED になる
+      # (adapter-messaging の SfnTaskCallbackAdapterIntegrationTest で実機確認済みの挙動)。
+      # LocalStack Community は ECS をサポートしないため、このテンプレートの非同期タスク起動は
+      # ECS RunTask ではなく SQS 経由の waitForTaskToken パターンを採用している
+      # (adapter-messaging/.../SettlementTaskListener.kt のコメント参照)。
+      - SERVICES=s3,sqs,stepfunctions,sts,iam,ssm,secretsmanager
+      - DEFAULT_REGION=us-east-1
+      - AWS_DEFAULT_REGION=us-east-1
+    ports:
+      - "4566:4566"
+    volumes:
+      # ready.d 配下のスクリプトは LocalStack の全サービスが起動完了した後に自動実行される。
+      - ./localstack-init:/etc/localstack/init/ready.d
+      - localstack-data:/var/lib/localstack
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  postgres-data:
+  localstack-data:
