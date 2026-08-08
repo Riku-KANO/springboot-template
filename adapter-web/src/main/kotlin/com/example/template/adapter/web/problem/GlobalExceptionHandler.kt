@@ -1,10 +1,12 @@
 package com.example.template.adapter.web.problem
 
+import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.http.ProblemDetail
 import org.springframework.web.ErrorResponseException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
+import org.springframework.web.server.ServerWebExchange
 
 /**
  * 意図的に最小限にとどめた例外ハンドラ。
@@ -23,7 +25,9 @@ import org.springframework.web.bind.annotation.RestControllerAdvice
  * 外れていく兆候であり、安易に増やすべきではない。
  */
 @RestControllerAdvice
-class GlobalExceptionHandler {
+class GlobalExceptionHandler(
+    private val problemMapper: DomainErrorProblemMapper,
+) {
     /**
      * [ErrorResponseException] (その部分型である [org.springframework.web.server.ResponseStatusException]
      * を含む) は Spring 自身が「どのステータスで応答すべきか」を既に把握している、
@@ -40,10 +44,24 @@ class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(Exception::class)
-    fun handleUnexpected(ex: Exception): ProblemDetail {
-        val problem = ProblemDetail.forStatusAndDetail(HttpStatus.INTERNAL_SERVER_ERROR, "unexpected error occurred")
-        problem.title = HttpStatus.INTERNAL_SERVER_ERROR.reasonPhrase
+    fun handleUnexpected(
+        ex: Exception,
+        exchange: ServerWebExchange,
+    ): ProblemDetail {
+        logger.error("unexpected error while handling request", ex)
+        val locale = exchange.apiLocale()
+        val problem =
+            ProblemDetail.forStatusAndDetail(
+                HttpStatus.INTERNAL_SERVER_ERROR,
+                problemMapper.message("error.unexpected", locale),
+            )
+        problem.title = problemMapper.message("problem.title.500", locale)
         problem.setProperty("requestId", currentRequestId())
+        problem.setProperty("code", "UNEXPECTED_ERROR")
         return problem
+    }
+
+    companion object {
+        private val logger = LoggerFactory.getLogger(GlobalExceptionHandler::class.java)
     }
 }

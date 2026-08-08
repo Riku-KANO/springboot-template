@@ -2,6 +2,7 @@ package com.example.template.adapter.web.security
 
 import arrow.core.left
 import com.example.template.adapter.web.order.OrderController
+import com.example.template.adapter.web.problem.DomainErrorProblemMapper
 import com.example.template.application.order.CancelOrder
 import com.example.template.application.order.CreateOrder
 import com.example.template.application.order.DeliverOrder
@@ -46,7 +47,7 @@ import org.springframework.test.web.reactive.server.WebTestClient
  * で自前にクライアントを組み立て、`mockJwt()` が機能する土台を用意している。
  */
 @WebFluxTest(controllers = [OrderController::class])
-@Import(SecurityConfig::class)
+@Import(SecurityConfig::class, DomainErrorProblemMapper::class)
 @TestPropertySource(
     properties = ["spring.security.oauth2.resourceserver.jwt.jwk-set-uri=https://example.invalid/jwks.json"],
 )

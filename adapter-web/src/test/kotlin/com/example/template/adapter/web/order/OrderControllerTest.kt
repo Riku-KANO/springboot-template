@@ -3,6 +3,7 @@ package com.example.template.adapter.web.order
 import arrow.core.NonEmptyList
 import arrow.core.left
 import arrow.core.right
+import com.example.template.adapter.web.problem.DomainErrorProblemMapper
 import com.example.template.application.order.CancelOrder
 import com.example.template.application.order.CreateOrder
 import com.example.template.application.order.DeliverOrder
@@ -26,6 +27,7 @@ import com.example.template.domain.shared.Sku
 import com.example.template.domain.testfixtures.shouldBeRight
 import io.mockk.coEvery
 import io.mockk.mockk
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.security.autoconfigure.ReactiveUserDetailsServiceAutoConfiguration
@@ -35,6 +37,7 @@ import org.springframework.boot.security.oauth2.server.resource.autoconfigure.we
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.boot.webflux.test.autoconfigure.WebFluxTest
 import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Import
 import org.springframework.http.MediaType
 import org.springframework.test.web.reactive.server.WebTestClient
 import java.time.Instant
@@ -55,6 +58,7 @@ import java.util.Currency
         ReactiveOAuth2ResourceServerWebSecurityAutoConfiguration::class,
     ],
 )
+@Import(DomainErrorProblemMapper::class)
 class OrderControllerTest {
     @Autowired
     lateinit var webTestClient: WebTestClient
@@ -236,6 +240,27 @@ class OrderControllerTest {
             .expectBody()
             .jsonPath("$.status")
             .isEqualTo(404)
+            .jsonPath("$.code")
+            .isEqualTo("ORDER_NOT_FOUND")
+    }
+
+    @Test
+    fun `Accept-Language Japanese localizes problem details without changing stable code`() {
+        val orderId = OrderId.create("missing-order").shouldBeRight()
+        coEvery { findOrder(any()) } returns OrderError.OrderNotFound(orderId).left()
+
+        webTestClient
+            .get()
+            .uri("/orders/missing-order")
+            .header("Accept-Language", "ja-JP, en;q=0.8")
+            .exchange()
+            .expectStatus()
+            .isNotFound
+            .expectBody()
+            .jsonPath("$.code")
+            .isEqualTo("ORDER_NOT_FOUND")
+            .jsonPath("$.detail")
+            .isEqualTo("注文「missing-order」が見つかりません。")
     }
 
     @Test
@@ -376,6 +401,11 @@ class OrderControllerTest {
             .exchange()
             .expectStatus()
             .isEqualTo(503)
+            .expectBody()
+            .jsonPath("$.code")
+            .isEqualTo("ORDER_REPOSITORY_UNAVAILABLE")
+            .jsonPath("$.detail")
+            .value<String> { detail -> assertFalse(detail.contains("connection refused")) }
     }
 
     @Test

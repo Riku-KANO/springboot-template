@@ -64,6 +64,12 @@ Spring 関連の依存を一切追加しない。誰かがこの2モジュール
 コンテキスト軸で分岐し、`:adapter-web` の `DomainErrorProblemMapper` はカテゴリ軸だけで
 HTTP ステータスを決める。詳細は `docs/arrow-style-guide.md` を参照。
 
+ドメインエラーが持つ `message` は診断用であり、Webレスポンスへ直接公開しない。
+`:adapter-web` の `DomainErrorProblemMapper` がADTを網羅的に安定エラーコードとmessage keyへ変換し、
+`Accept-Language`に応じた日英の文言を生成する。これによりドメイン層をLocaleやSpringの
+`MessageSource`から独立させたまま、クライアントには言語非依存の機械可読な契約を提供する。
+詳細は `docs/error-handling-and-i18n.md` を参照。
+
 ## リクエストフロー: 注文の決済確定 (`POST /orders/{id}/pay`)
 
 `pay` は `Draft -> PendingPayment -> Paid` という注文ライフサイクルの2番目のステップである。
