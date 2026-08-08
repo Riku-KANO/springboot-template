@@ -8,7 +8,8 @@ import com.example.template.adapter.web.order.dto.CancelOrderRequest
 import com.example.template.adapter.web.order.dto.CreateOrderRequest
 import com.example.template.adapter.web.order.dto.RefundOrderRequest
 import com.example.template.adapter.web.order.dto.ShipOrderRequest
-import com.example.template.adapter.web.problem.toProblemDetailResponse
+import com.example.template.adapter.web.problem.DomainErrorProblemMapper
+import com.example.template.adapter.web.problem.apiLocale
 import com.example.template.application.order.CancelOrder
 import com.example.template.application.order.CancelOrderCommand
 import com.example.template.application.order.CreateOrder
@@ -41,6 +42,7 @@ import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.server.ServerWebExchange
 import java.util.Currency
 
 /**
@@ -69,6 +71,7 @@ class OrderController(
     private val deliverOrder: DeliverOrder,
     private val cancelOrder: CancelOrder,
     private val refundOrder: RefundOrder,
+    private val problemMapper: DomainErrorProblemMapper,
 ) {
     /**
      * 注文作成。ヘッドライン機能である「累積バリデーション」をここで実演する。
@@ -79,13 +82,19 @@ class OrderController(
     @PostMapping
     suspend fun create(
         @RequestBody request: CreateOrderRequest,
+        exchange: ServerWebExchange,
     ): ResponseEntity<*> {
         val currency =
             runCatching { Currency.getInstance(request.currency) }.getOrNull()
-                ?: return structuralBadRequest("invalid ISO-4217 currency code: '${request.currency}'")
+                ?: return problemMapper.badRequest(
+                    "CURRENCY_CODE_INVALID",
+                    "error.request.currency.invalid",
+                    exchange.apiLocale(),
+                    request.currency,
+                )
         val rawLines =
             request.lines.map { it.toRaw() }.toNonEmptyListOrNull()
-                ?: return structuralBadRequest("an order must contain at least one line")
+                ?: return problemMapper.badRequest("ORDER_LINES_EMPTY", "error.request.order-lines.empty", exchange.apiLocale())
 
         // Either<NonEmptyList<ValidationError>, _>.bind() と Either<OrderError, _>.bind() を
         // 同じ either ブロックの中で混在させられるのは、arrow.core.raise.Raise が
@@ -102,7 +111,7 @@ class OrderController(
                     .bind()
             createOrder(command).mapLeft { nonEmptyListOf(it) }.bind()
         }.fold(
-            { it.toProblemDetailResponse() },
+            { problemMapper.toProblemDetailResponse(it, exchange.apiLocale()) },
             { ResponseEntity.status(HttpStatus.CREATED).body(it.toResponse()) },
         )
     }
@@ -110,11 +119,12 @@ class OrderController(
     @GetMapping("/{id}")
     suspend fun get(
         @PathVariable id: String,
+        exchange: ServerWebExchange,
     ): ResponseEntity<*> =
         either {
             val orderId = OrderId.create(id).bind()
             findOrder(FindOrderQuery(orderId)).bind()
-        }.fold({ it.toProblemDetailResponse() }, { ResponseEntity.ok(it.toResponse()) })
+        }.fold({ problemMapper.toProblemDetailResponse(it, exchange.apiLocale()) }, { ResponseEntity.ok(it.toResponse()) })
 
     /**
      * 注文を確定し決済待ちにする (Draft -> PendingPayment)。
@@ -125,20 +135,22 @@ class OrderController(
     @PostMapping("/{id}/submit")
     suspend fun submit(
         @PathVariable id: String,
+        exchange: ServerWebExchange,
     ): ResponseEntity<*> =
         either {
             val orderId = OrderId.create(id).bind()
             submitOrderForPayment(SubmitOrderForPaymentCommand(orderId)).bind()
-        }.fold({ it.toProblemDetailResponse() }, { ResponseEntity.ok(it.toResponse()) })
+        }.fold({ problemMapper.toProblemDetailResponse(it, exchange.apiLocale()) }, { ResponseEntity.ok(it.toResponse()) })
 
     @PostMapping("/{id}/pay")
     suspend fun pay(
         @PathVariable id: String,
+        exchange: ServerWebExchange,
     ): ResponseEntity<*> =
         either {
             val orderId = OrderId.create(id).bind()
             payOrder(PayOrderCommand(orderId)).bind()
-        }.fold({ it.toProblemDetailResponse() }, { ResponseEntity.ok(it.toResponse()) })
+        }.fold({ problemMapper.toProblemDetailResponse(it, exchange.apiLocale()) }, { ResponseEntity.ok(it.toResponse()) })
 
     /**
      * 倉庫でのピッキング・梱包着手を記録する (Paid -> Fulfilling)。`ship` の前提状態を作る。
@@ -150,41 +162,45 @@ class OrderController(
     @PostMapping("/{id}/start-fulfillment")
     suspend fun startFulfilling(
         @PathVariable id: String,
+        exchange: ServerWebExchange,
     ): ResponseEntity<*> =
         either {
             val orderId = OrderId.create(id).bind()
             startFulfillment(StartFulfillmentCommand(orderId)).bind()
-        }.fold({ it.toProblemDetailResponse() }, { ResponseEntity.ok(it.toResponse()) })
+        }.fold({ problemMapper.toProblemDetailResponse(it, exchange.apiLocale()) }, { ResponseEntity.ok(it.toResponse()) })
 
     @PostMapping("/{id}/ship")
     suspend fun ship(
         @PathVariable id: String,
         @RequestBody request: ShipOrderRequest,
+        exchange: ServerWebExchange,
     ): ResponseEntity<*> =
         either {
             val orderId = OrderId.create(id).bind()
             shipOrder(ShipOrderCommand(orderId, request.trackingNumber)).bind()
-        }.fold({ it.toProblemDetailResponse() }, { ResponseEntity.ok(it.toResponse()) })
+        }.fold({ problemMapper.toProblemDetailResponse(it, exchange.apiLocale()) }, { ResponseEntity.ok(it.toResponse()) })
 
     /** 顧客への配達完了を記録する (Shipped -> Delivered)。7つの domain 遷移のうち最後の1つ。 */
     @PostMapping("/{id}/deliver")
     suspend fun deliver(
         @PathVariable id: String,
+        exchange: ServerWebExchange,
     ): ResponseEntity<*> =
         either {
             val orderId = OrderId.create(id).bind()
             deliverOrder(DeliverOrderCommand(orderId)).bind()
-        }.fold({ it.toProblemDetailResponse() }, { ResponseEntity.ok(it.toResponse()) })
+        }.fold({ problemMapper.toProblemDetailResponse(it, exchange.apiLocale()) }, { ResponseEntity.ok(it.toResponse()) })
 
     @PostMapping("/{id}/cancel")
     suspend fun cancel(
         @PathVariable id: String,
         @RequestBody request: CancelOrderRequest,
+        exchange: ServerWebExchange,
     ): ResponseEntity<*> =
         either {
             val orderId = OrderId.create(id).bind()
             cancelOrder(CancelOrderCommand(orderId, request.reason)).bind()
-        }.fold({ it.toProblemDetailResponse() }, { ResponseEntity.ok(it.toResponse()) })
+        }.fold({ problemMapper.toProblemDetailResponse(it, exchange.apiLocale()) }, { ResponseEntity.ok(it.toResponse()) })
 
     /**
      * 注文を返金済みにする ({Paid, Delivered} -> Refunded)。返金額は生の Long/String のまま
@@ -197,15 +213,21 @@ class OrderController(
     suspend fun refund(
         @PathVariable id: String,
         @RequestBody request: RefundOrderRequest,
+        exchange: ServerWebExchange,
     ): ResponseEntity<*> {
         val currency =
             runCatching { Currency.getInstance(request.currency) }.getOrNull()
-                ?: return structuralBadRequest("invalid ISO-4217 currency code: '${request.currency}'")
+                ?: return problemMapper.badRequest(
+                    "CURRENCY_CODE_INVALID",
+                    "error.request.currency.invalid",
+                    exchange.apiLocale(),
+                    request.currency,
+                )
         return either {
             val orderId = OrderId.create(id).bind()
             val amountMinor = MoneyMinor.create(request.amountMinor).bind()
             refundOrder(RefundOrderCommand(orderId, Money(amountMinor, currency))).bind()
-        }.fold({ it.toProblemDetailResponse() }, { ResponseEntity.ok(it.toResponse()) })
+        }.fold({ problemMapper.toProblemDetailResponse(it, exchange.apiLocale()) }, { ResponseEntity.ok(it.toResponse()) })
     }
 
     /**
@@ -220,9 +242,4 @@ class OrderController(
      * パイプラインに入る前にここでフェイルファストに弾く。3件同時に返る累積バリデーションの
      * デモは、この前処理を通過した後の orderId・customerId・明細内容の3軸に対して行う。
      */
-    private fun structuralBadRequest(detail: String): ResponseEntity<ProblemDetail> {
-        val problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, detail)
-        problem.title = HttpStatus.BAD_REQUEST.reasonPhrase
-        return ResponseEntity.of(problem).build()
-    }
 }

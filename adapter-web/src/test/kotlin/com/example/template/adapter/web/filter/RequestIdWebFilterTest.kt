@@ -3,6 +3,7 @@ package com.example.template.adapter.web.filter
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
+import com.example.template.adapter.web.problem.DomainErrorProblemMapper
 import kotlinx.coroutines.delay
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -29,7 +30,7 @@ import org.springframework.web.bind.annotation.RestController
  * 本番と同じ経路で検証する。
  */
 @WebFluxTest(controllers = [ProbeController::class])
-@Import(RequestIdWebFilter::class)
+@Import(RequestIdWebFilter::class, DomainErrorProblemMapper::class)
 class RequestIdWebFilterTest {
     @Autowired
     lateinit var webTestClient: WebTestClient

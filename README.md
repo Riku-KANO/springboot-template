@@ -160,6 +160,7 @@ terraform validate
 |---|---|
 | [`docs/architecture.md`](docs/architecture.md) | モジュール構成、依存ルールの強制方法、リクエスト/バッチフロー図 |
 | [`docs/arrow-style-guide.md`](docs/arrow-style-guide.md) | Either/EitherNel の使い分け、`.bindNel()` の罠、optics |
+| [`docs/error-handling-and-i18n.md`](docs/error-handling-and-i18n.md) | 安定エラーコード、安全な公開文言、Accept-Language による日英対応 |
 | [`docs/testing-strategy.md`](docs/testing-strategy.md) | JUnit 6 と Kotest の使い分け、Testcontainers |
 | [`docs/local-development.md`](docs/local-development.md) | ローカル環境の構築・動作確認手順 |
 | [`docs/how-to-use-this-template.md`](docs/how-to-use-this-template.md) | パッケージ名の変更、不要なサンプルの削除、初回デプロイ |
