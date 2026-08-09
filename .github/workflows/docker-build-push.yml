@@ -28,7 +28,7 @@ jobs:
     env:
       DEPLOY_ENV: ${{ inputs.environment || 'dev' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Validate deployment source
         run: |
