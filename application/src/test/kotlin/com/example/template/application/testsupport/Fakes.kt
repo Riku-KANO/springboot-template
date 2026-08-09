@@ -29,15 +29,27 @@ import java.time.Instant
 /** インメモリの OrderRepository フェイク。save が呼ばれたかどうかを検証できるよう記録する。 */
 class FakeOrderRepository(
     initial: Order? = null,
+    additional: List<Order> = emptyList(),
 ) : OrderRepository {
     private val store = mutableMapOf<OrderId, Order>()
     val savedOrders = mutableListOf<Order>()
 
     init {
         initial?.let { store[it.id] = it }
+        additional.forEach { store[it.id] = it }
     }
 
     override suspend fun findById(id: OrderId): Either<OrderError, Order> = store[id]?.right() ?: Either.Left(OrderError.OrderNotFound(id))
+
+    override suspend fun findPage(
+        after: OrderId?,
+        limit: Int,
+    ): Either<OrderError, List<Order>> =
+        store.values
+            .sortedBy { it.id.value }
+            .filter { after == null || it.id.value > after.value }
+            .take(limit)
+            .right()
 
     override suspend fun save(order: Order): Either<OrderError, Order> {
         savedOrders += order

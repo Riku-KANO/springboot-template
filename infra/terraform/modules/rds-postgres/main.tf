@@ -52,9 +52,8 @@ resource "aws_db_instance" "this" {
   apply_immediately            = var.apply_immediately
 
   # V0__batch_schema.sql (Spring Batch 6 のメタデータ) を含め、全スキーマは Flyway が
-  # 唯一の情報源として適用する (dev は :bootstrap 起動時、stg/prod はデプロイパイプラインの
-  # 専用ステップで `flyway migrate` を実行する。application-{stg,prod}.yml の
-  # spring.flyway.enabled=false を参照)。そのため RDS 側でパラメータグループによる
+  # 唯一の情報源として適用する (AWS環境はデプロイパイプラインの専用migration task、
+  # localだけは:bootstrap起動時に適用する)。そのため RDS 側でパラメータグループによる
   # 追加のスキーマ初期化は行わない。
 
   tags = var.tags

@@ -7,6 +7,7 @@ import com.example.template.application.order.CancelOrder
 import com.example.template.application.order.CreateOrder
 import com.example.template.application.order.DeliverOrder
 import com.example.template.application.order.FindOrder
+import com.example.template.application.order.ListOrders
 import com.example.template.application.order.PayOrder
 import com.example.template.application.order.RefundOrder
 import com.example.template.application.order.ShipOrder
@@ -25,6 +26,7 @@ import org.springframework.boot.webflux.test.autoconfigure.WebFluxTest
 import org.springframework.context.ApplicationContext
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
+import org.springframework.security.core.authority.SimpleGrantedAuthority
 import org.springframework.security.test.web.reactive.server.SecurityMockServerConfigurers.mockJwt
 import org.springframework.security.test.web.reactive.server.SecurityMockServerConfigurers.springSecurity
 import org.springframework.test.context.TestPropertySource
@@ -74,6 +76,9 @@ class SecurityConfigTest {
         fun findOrder(): FindOrder = mockk()
 
         @Bean
+        fun listOrders(): ListOrders = mockk()
+
+        @Bean
         fun submitOrderForPayment(): SubmitOrderForPayment = mockk()
 
         @Bean
@@ -111,7 +116,7 @@ class SecurityConfigTest {
         coEvery { findOrder(any()) } returns OrderError.OrderNotFound(orderId).left()
 
         webTestClient
-            .mutateWith(mockJwt())
+            .mutateWith(mockJwt().authorities(SimpleGrantedAuthority("SCOPE_orders.read")))
             .get()
             .uri("/orders/order-1")
             .exchange()
@@ -119,6 +124,28 @@ class SecurityConfigTest {
             // モックが OrderNotFound を返すよう設定してあるので 404 まで到達する。
             .expectStatus()
             .isNotFound
+    }
+
+    @Test
+    fun `read endpoint rejects a token without orders read scope`() {
+        webTestClient
+            .mutateWith(mockJwt())
+            .get()
+            .uri("/orders/order-1")
+            .exchange()
+            .expectStatus()
+            .isForbidden
+    }
+
+    @Test
+    fun `write endpoint rejects a token with read scope only`() {
+        webTestClient
+            .mutateWith(mockJwt().authorities(SimpleGrantedAuthority("SCOPE_orders.read")))
+            .post()
+            .uri("/orders/order-1/submit")
+            .exchange()
+            .expectStatus()
+            .isForbidden
     }
 
     @Test

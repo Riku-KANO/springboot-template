@@ -164,6 +164,11 @@ class ReconcileSettlementServiceTest {
                 object : com.example.template.application.port.OrderRepository {
                     override suspend fun findById(id: OrderId) = Either.Left(OrderError.RepositoryUnavailable("db down"))
 
+                    override suspend fun findPage(
+                        after: OrderId?,
+                        limit: Int,
+                    ): Either<OrderError, List<Order>> = Either.Left(OrderError.RepositoryUnavailable("db down"))
+
                     override suspend fun save(order: Order) = Either.Right(order)
                 }
             val settlementRepository = FakeSettlementRepository()

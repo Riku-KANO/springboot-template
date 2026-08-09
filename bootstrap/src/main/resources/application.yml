@@ -9,6 +9,9 @@ spring:
   application:
     name: springboot-template
 
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+
   batch:
     job:
       # JobLauncherApplicationRunner (org.springframework.boot.batch.autoconfigure) は
@@ -32,15 +35,24 @@ management:
   endpoints:
     web:
       exposure:
-        # health/info のみを公開する既定値。prod ではさらに絞る (application-prod.yml 参照)。
-        include: health,info
+        # health/info と Prometheus scrape endpoint を公開する。認可ルールは SecurityConfig が担う。
+        include: health,info,prometheus
   endpoint:
     health:
       show-details: when-authorized
       probes:
         enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+  tracing:
+    sampling:
+      probability: 1.0
 
 logging:
   level:
     root: INFO
     com.example.template: INFO
+
+server:
+  shutdown: graceful

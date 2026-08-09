@@ -137,6 +137,8 @@ class DomainErrorProblemMapper(
                     "error.order.invalid-transition",
                     arrayOf(attempted, message(statusMessageKey(from), locale)),
                 )
+            is OrderError.ConcurrentModification ->
+                ErrorDescriptor("ORDER_CONCURRENT_MODIFICATION", "error.order.concurrent-modification", arrayOf(orderId.value))
             is OrderError.PaymentGatewayUnavailable ->
                 ErrorDescriptor("PAYMENT_GATEWAY_UNAVAILABLE", "error.payment-gateway.unavailable")
             is OrderError.RepositoryUnavailable -> ErrorDescriptor("ORDER_REPOSITORY_UNAVAILABLE", "error.order-repository.unavailable")

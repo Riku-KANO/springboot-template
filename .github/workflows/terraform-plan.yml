@@ -5,7 +5,7 @@
 # (infra/terraform/modules/iam の github_actions_role_arn) が未ブートストラップの
 # 状態 (テンプレートを初めて clone した直後等) では認証情報が無く実行できない。
 # fmt/init/validate はどの状態でも常に実行し、plan だけは
-# AWS_GITHUB_ACTIONS_ROLE_ARN リポジトリ変数が設定されている場合のみ実行する
+# TERRAFORM_PLAN_ENABLEDリポジトリ変数がtrueの場合のみ実行する
 # (docs/how-to-use-this-template.md の OIDC ブートストラップ手順を参照)。
 # ============================================================================
 name: Terraform Plan
@@ -58,11 +58,12 @@ jobs:
     name: plan
     needs: fmt-validate
     runs-on: ubuntu-latest
-    if: vars.AWS_GITHUB_ACTIONS_ROLE_ARN != ''
+    if: vars.TERRAFORM_PLAN_ENABLED == 'true'
     strategy:
       fail-fast: false
       matrix:
         env: [dev, stg, prod]
+    environment: ${{ matrix.env }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -75,7 +76,7 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+          role-to-assume: ${{ vars.AWS_TERRAFORM_PLAN_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
       - name: terraform init (実バックエンドあり)

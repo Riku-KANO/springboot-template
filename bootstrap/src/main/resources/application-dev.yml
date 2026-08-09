@@ -1,10 +1,8 @@
 # ============================================================================
 # dev プロファイル: 実際の AWS (dev アカウント) + 実際の dev IdP に接続する。
 #
-# このテンプレート自体はどの実インフラも保持していない (infra/terraform 側で将来
-# プロビジョニングされる想定。本チャンクの守備範囲は :bootstrap の composition root と
-# ローカル docker-compose 環境のみ)。ここに書く URI/ARN 相当の値はすべて置き換え前提の
-# プレースホルダであり、実際にデプロイする際は環境ごとの正しい値に差し替えること。
+# 実インフラはinfra/terraformがプロビジョニングする。ここに書くDB URIはローカル実行用の
+# フォールバック例で、ECSではTerraformが実際のRDS endpointとsecretを環境変数で上書きする。
 # ============================================================================
 
 spring:
@@ -28,7 +26,7 @@ spring:
     password: template
 
   flyway:
-    enabled: true # dev はまだ起動時マイグレーションを許容する (stg/prod は別デプロイ工程に切り出す)
+    enabled: false # 全AWS環境でデプロイ前のmigration ECSタスクを唯一の適用経路にする
 
   cloud:
     aws:

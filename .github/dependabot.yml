@@ -1,0 +1,23 @@
+version: 2
+updates:
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      kotlin-arrow:
+        patterns: ["org.jetbrains.kotlin*", "io.arrow-kt*", "com.google.devtools.ksp*"]
+      spring:
+        patterns: ["org.springframework*", "io.awspring.cloud*"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: terraform
+    directory: /infra/terraform/envs/dev
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: /docker
+    schedule:
+      interval: weekly

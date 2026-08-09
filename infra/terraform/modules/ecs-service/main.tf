@@ -56,15 +56,8 @@ resource "aws_ecs_task_definition" "this" {
         }
       }
 
-      healthCheck = {
-        # actuator の health/info のみを公開する既定 (application.yml の
-        # management.endpoints.web.exposure.include) に合わせる。
-        command     = ["CMD-SHELL", "wget -q -O- http://localhost:${var.container_port}/actuator/health || exit 1"]
-        interval    = 30
-        timeout     = 5
-        retries     = 3
-        startPeriod = 60
-      }
+      # コンテナ内に curl/wget があることを前提にしない。readiness は ALB の
+      # /actuator/health/readiness health check で判定する。
     }
   ])
 
@@ -99,9 +92,9 @@ resource "aws_ecs_service" "this" {
 
   lifecycle {
     ignore_changes = [
-      # CI (docker-build-push.yml 想定) や別の apply が desired_count を変えている場合に
-      # terraform plan のたびに差分が出るのを避けたければ、この行のコメントを外して運用する。
-      # (テンプレートの既定では Terraform を正とするため無効化のままにしている)
+      # Terraform はサービスの土台、CI は SHA 固定の task definition revision を管理する。
+      # apply のたびに CI がデプロイした revision を :latest へ戻さない。
+      task_definition,
     ]
   }
 

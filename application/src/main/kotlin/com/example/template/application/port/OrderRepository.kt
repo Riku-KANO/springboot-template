@@ -30,6 +30,12 @@ interface OrderRepository {
     /** 注文を ID で取得する。存在しない場合は [OrderError.OrderNotFound] を返す。 */
     suspend fun findById(id: OrderId): Either<OrderError, Order>
 
+    /** ID昇順のcursor pagination。afterは直前ページの末尾ID。 */
+    suspend fun findPage(
+        after: OrderId?,
+        limit: Int,
+    ): Either<OrderError, List<Order>>
+
     /** 注文を作成または更新する (upsert)。永続化された結果 (実装によっては生成される付随情報を反映) を返す。 */
     suspend fun save(order: Order): Either<OrderError, Order>
 }

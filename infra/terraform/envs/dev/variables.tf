@@ -169,3 +169,40 @@ variable "create_github_oidc_provider" {
   type        = bool
   default     = true
 }
+
+variable "terraform_state_bucket_name" {
+  description = "backend.tfに設定したremote state bucket名。"
+  type        = string
+  default     = "template-terraform-state-EXAMPLE_ACCOUNT_ID"
+}
+
+variable "terraform_lock_table_name" {
+  description = "backend.tfに設定したDynamoDB lock table名。"
+  type        = string
+  default     = "template-terraform-locks"
+}
+
+variable "api_certificate_arn" {
+  description = "API用ACM証明書ARN。nullならALBはHTTPのみ。"
+  type        = string
+  default     = null
+  nullable    = true
+}
+
+variable "api_hosted_zone_id" {
+  type     = string
+  default  = null
+  nullable = true
+}
+
+variable "api_domain_name" {
+  type     = string
+  default  = null
+  nullable = true
+}
+
+variable "alarm_email" {
+  type     = string
+  default  = null
+  nullable = true
+}

@@ -37,6 +37,9 @@ dependencies {
     // actuator: どの adapter モジュールも宣言していないため、/actuator/health 等の
     // Definition of Done で要求されるエンドポイントのためにここで初めて追加する。
     implementation("org.springframework.boot:spring-boot-starter-actuator")
+    implementation("io.micrometer:micrometer-registry-prometheus")
+    implementation("io.micrometer:micrometer-tracing-bridge-otel")
+    implementation("io.opentelemetry:opentelemetry-exporter-otlp")
 
     // R2DBC: DatabaseClient / ReactiveTransactionManager / TransactionalOperator (spring-tx) の
     // 型を config/PersistenceBeans.kt, config/R2dbcTransactionConfig.kt から直接参照するために必要。
@@ -91,4 +94,8 @@ dependencies {
     // 座標のモジュールに切り出されており、これを明示的に依存追加しない限り
     // FlywayAutoConfiguration 自体がクラスパス上に存在しない。
     implementation("org.springframework.boot:spring-boot-flyway")
+
+    testImplementation("org.springframework.boot:spring-boot-starter-webflux-test")
+    testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.testcontainers.junit.jupiter)
 }

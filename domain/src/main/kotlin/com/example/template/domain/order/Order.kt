@@ -25,6 +25,8 @@ data class Order(
     val lines: NonEmptyList<OrderLine>,
     val address: ShippingAddress,
     val status: OrderStatus,
+    /** 未永続化は-1、永続化後は0以上。更新時の楽観ロックに利用する。 */
+    val version: Long = -1,
 ) {
     companion object {
         /**

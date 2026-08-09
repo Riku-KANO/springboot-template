@@ -75,6 +75,12 @@ data class OrderResponse(
     val status: String,
     val lines: List<OrderLineResponse>,
     val address: ShippingAddressResponse,
+    val version: Long,
+)
+
+data class OrderPageResponse(
+    val items: List<OrderResponse>,
+    val nextCursor: String?,
 )
 
 data class OrderLineResponse(

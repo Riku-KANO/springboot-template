@@ -132,3 +132,38 @@ variable "github_oidc_allowed_refs" {
   type        = list(string)
   default     = ["refs/heads/main", "refs/tags/*"]
 }
+
+variable "terraform_state_bucket_name" {
+  type    = string
+  default = "template-terraform-state-EXAMPLE_ACCOUNT_ID"
+}
+
+variable "terraform_lock_table_name" {
+  type    = string
+  default = "template-terraform-locks"
+}
+
+variable "api_certificate_arn" {
+  description = "API用ACM証明書ARN。指定時はHTTPをHTTPSへリダイレクトする。"
+  type        = string
+  default     = null
+  nullable    = true
+}
+
+variable "api_hosted_zone_id" {
+  type     = string
+  default  = null
+  nullable = true
+}
+
+variable "api_domain_name" {
+  type     = string
+  default  = null
+  nullable = true
+}
+
+variable "alarm_email" {
+  type     = string
+  default  = null
+  nullable = true
+}

@@ -4,14 +4,29 @@ import com.example.template.application.port.TaskCallbackPort
 import com.example.template.application.port.TaskToken
 import com.example.template.domain.error.SettlementError
 import io.awspring.cloud.sqs.annotation.SqsListener
+import jakarta.validation.constraints.NotBlank
 import kotlinx.coroutines.runBlocking
 import org.slf4j.LoggerFactory
 import org.springframework.batch.core.job.Job
 import org.springframework.batch.core.job.parameters.JobParametersBuilder
 import org.springframework.batch.core.launch.JobOperator
 import org.springframework.beans.factory.annotation.Qualifier
+import org.springframework.boot.context.properties.ConfigurationProperties
+import org.springframework.boot.context.properties.EnableConfigurationProperties
+import org.springframework.context.annotation.Configuration
 import org.springframework.stereotype.Component
+import org.springframework.validation.annotation.Validated
 import java.time.LocalDate
+
+@ConfigurationProperties(prefix = "settlement.sqs")
+@Validated
+data class SettlementSqsProperties(
+    @field:NotBlank val queueName: String,
+)
+
+@Configuration
+@EnableConfigurationProperties(SettlementSqsProperties::class)
+class SettlementSqsPropertiesConfig
 
 /**
  * SQS で受け取った消込バッチの起動要求 `{ settlementDate, taskToken }`。

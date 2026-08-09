@@ -35,6 +35,7 @@ fun Order.toResponse(): OrderResponse =
         status = status.toLabel(),
         lines = lines.map { it.toResponse() },
         address = address.toResponse(),
+        version = version,
     )
 
 /**

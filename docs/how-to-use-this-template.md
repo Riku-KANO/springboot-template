@@ -84,33 +84,52 @@ S3 バケット名は AWS 全体でグローバルに一意である必要があ
    `infra/terraform/envs/dev/backend.tf` のコメントに具体的な `aws s3api create-bucket`/
    `aws dynamodb create-table` コマンドを記載してある。stg/prod も同じバケットの
    別 key に相乗りしてよい (この例では相乗りする前提で書いてある)。
+   `backend.tf` のbucket/table名と `terraform_state_bucket_name`/
+   `terraform_lock_table_name` は必ず同じ値にする。別AWSアカウントの共通bucketを使う場合は、
+   各環境の `github_actions_plan_role_arn` にstate読取を許すbucket policyも必要になる。
 2. **`terraform.tfvars` を実際の値に書き換える** (`account_id`, `github_repository`,
-   `settlement_bucket_name` 等。プレースホルダのままでは apply できない、あるいは
+   `settlement_bucket_name`, `alarm_email` 等。prod ではさらに `api_certificate_arn`,
+   `api_hosted_zone_id`, `api_domain_name` が必須。プレースホルダのままでは apply できない、あるいは
    意図しないアカウント/バケットに向いてしまう)。
 3. **dev から順に、人手の AWS 認証情報 (管理者権限、または十分な権限を持つロール) で
    `terraform apply` する。** このとき `create_github_oidc_provider = true`
    (dev の `terraform.tfvars` の既定値) により、GitHub Actions 用の OIDC プロバイダと
    ロールも同時に作られる。
-4. **OIDC ブートストラップ (鶏と卵の解消)**: dev の apply が終わったら、
-   `terraform output github_actions_role_arn` (と ECR リポジトリ URL、リージョン) を
-   GitHub リポジトリの `Settings > Secrets and variables > Actions > Variables` に
-   `AWS_GITHUB_ACTIONS_ROLE_ARN` / `ECR_REPOSITORY_URL` / `AWS_REGION` として登録する。
+4. **OIDC ブートストラップ (鶏と卵の解消)**: GitHub の `dev`/`stg`/`prod` Environment を作り、
+   各 Environment の Variables に以下を登録する。値は同じ環境の Terraform output と
+   `aws_region` から得られる。Environmentのdeployment branch/tag ruleもdev=`main`、
+   stg=`main`とrelease tag、prod=`main`に絞り、prodにはrequired reviewersを設定することを推奨する。
+   Environmentを使うjobのOIDC `sub` にはrefが含まれないため、このGitHub側ルールも認可境界の一部になる。
+
+   | Variable | 値 |
+   |---|---|
+   | `AWS_GITHUB_ACTIONS_ROLE_ARN` | `github_actions_role_arn` |
+   | `AWS_TERRAFORM_PLAN_ROLE_ARN` | `github_actions_plan_role_arn` |
+   | `AWS_REGION` | Terraform の `aws_region` |
+   | `ECR_REPOSITORY_URL` | `ecr_repository_url` |
+   | `ECS_CLUSTER` | `ecs_cluster_name` |
+   | `ECS_API_SERVICE` | `ecs_api_service_name` |
+   | `ECS_BATCH_TASK_FAMILY` | `ecs_batch_task_family` |
+   | `API_ENDPOINT` | `api_endpoint` |
+
+   Terraform planもAWS refresh込みで実行する場合は、全Environmentの登録後にRepository variable
+   `TERRAFORM_PLAN_ENABLED=true` を追加する。初回apply前はplan role自体が存在しないため、
+   このflagを設定せずfmt/validateだけを動かす。
+
    ここまでやって初めて `.github/workflows/docker-build-push.yml` が動くようになる
    (このワークフロー自身がまだ存在しないロールを使って自分を bootstrap することはできない、
    という制約は最初から織り込み済み)。
 5. **stg/prod は `create_github_oidc_provider = false` のまま** (既定値) apply する。
    OIDC プロバイダは AWS アカウントに1つで足りる共有リソースであり、dev が作った
    ものを `account_id` から決定的に導出した ARN で参照する。
-6. DB 認証情報 (`template/{env}/db-credentials` という名前の Secrets Manager シークレット) は
-   Terraform (`random_password` + `aws_secretsmanager_secret`) が自動生成する。
-   `application-{dev,stg,prod}.yml` の `spring.config.import` がこの名前をそのまま読みに行く
-   ので、シークレット名を変える場合は両方揃えて変更すること。
-7. Flyway のマイグレーション適用: dev は `:bootstrap` の起動時に自動適用される
-   (`spring.flyway.enabled=true`)。stg/prod は起動時に適用しない設計
-   (`spring.flyway.enabled=false`) なので、デプロイパイプラインの専用ステップとして
-   `flyway migrate` (あるいは同等の CLI/コンテナジョブ) を別途用意する必要がある
-   --- **本テンプレートはこの専用ステップ自体を自動化していない** (今のところ
-   `.github/workflows/` に Flyway 単体の実行ジョブは無い。必要に応じて追加すること)。
+6. DB 認証情報 (`template/{env}/db-credentials`) は Terraform が自動生成し、JDBC/R2DBC の
+   URL・username・password は ECS API/Batch task definition に環境変数と secret referenceで
+   注入される。`application-{env}.yml` のホスト名はフォールバック例であり、ECSでは使われない。
+7. `main` へのpushはdevへ自動デプロイする。stg/prodは `Build & Deploy` を手動実行し、対象
+   Environmentを選ぶ。ワークフローはSHA固定イメージのbuild/push/署名、SBOM生成とattestation、
+   脆弱性スキャン、`<env>,migration` ECSワンショットタスク、API task definition更新、service安定待ち、
+   readiness smoke testの順で進む。AWS環境では起動時Flywayを無効にし、このmigration taskを
+   唯一のスキーマ適用経路にしている (localだけは起動時に適用する)。
 
 ## 5. 継続的な運用で気をつけること
 

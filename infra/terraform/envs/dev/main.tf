@@ -157,7 +157,10 @@ module "iam" {
   existing_github_oidc_provider_arn = local.github_oidc_provider_arn
   github_repository                 = var.github_repository
   github_oidc_allowed_refs          = var.github_oidc_allowed_refs
+  github_oidc_allowed_environments  = [local.env_name]
   ecr_repository_arn                = module.ecr.repository_arn
+  terraform_state_bucket_arn        = "arn:aws:s3:::${var.terraform_state_bucket_name}"
+  terraform_lock_table_arn          = "arn:aws:dynamodb:${var.aws_region}:${var.account_id}:table/${var.terraform_lock_table_name}"
   tags                              = local.common_tags
 }
 
@@ -171,8 +174,31 @@ module "ecs_task_batch" {
   memory             = var.ecs_batch_memory
   execution_role_arn = module.iam.ecs_task_execution_role_arn
   task_role_arn      = module.iam.ecs_batch_task_role_arn
+  environment = {
+    SPRING_DATASOURCE_URL      = "jdbc:postgresql://${module.rds.address}:${module.rds.port}/${module.rds.db_name}"
+    SPRING_DATASOURCE_USERNAME = "template_admin"
+    SPRING_R2DBC_URL           = "r2dbc:postgresql://${module.rds.address}:${module.rds.port}/${module.rds.db_name}"
+    SPRING_R2DBC_USERNAME      = "template_admin"
+  }
+  secrets = {
+    SPRING_DATASOURCE_PASSWORD = "${aws_secretsmanager_secret.db_credentials.arn}:password::"
+    SPRING_R2DBC_PASSWORD      = "${aws_secretsmanager_secret.db_credentials.arn}:password::"
+  }
   log_retention_days = var.log_retention_days
   region             = var.aws_region
+  tags               = local.common_tags
+}
+
+module "alb" {
+  source = "../../modules/alb"
+
+  name               = local.name
+  vpc_id             = module.network.vpc_id
+  subnet_ids         = module.network.public_subnet_ids
+  security_group_ids = [module.network.alb_security_group_id]
+  certificate_arn    = var.api_certificate_arn
+  hosted_zone_id     = var.api_hosted_zone_id
+  domain_name        = var.api_domain_name
   tags               = local.common_tags
 }
 
@@ -193,6 +219,17 @@ module "ecs_service_api" {
   assign_public_ip   = false
   execution_role_arn = module.iam.ecs_task_execution_role_arn
   task_role_arn      = module.iam.ecs_api_task_role_arn
+  target_group_arn   = module.alb.target_group_arn
+  environment = {
+    SPRING_DATASOURCE_URL      = "jdbc:postgresql://${module.rds.address}:${module.rds.port}/${module.rds.db_name}"
+    SPRING_DATASOURCE_USERNAME = "template_admin"
+    SPRING_R2DBC_URL           = "r2dbc:postgresql://${module.rds.address}:${module.rds.port}/${module.rds.db_name}"
+    SPRING_R2DBC_USERNAME      = "template_admin"
+  }
+  secrets = {
+    SPRING_DATASOURCE_PASSWORD = "${aws_secretsmanager_secret.db_credentials.arn}:password::"
+    SPRING_R2DBC_PASSWORD      = "${aws_secretsmanager_secret.db_credentials.arn}:password::"
+  }
   log_retention_days = var.log_retention_days
   region             = var.aws_region
   tags               = local.common_tags
@@ -201,6 +238,21 @@ module "ecs_service_api" {
 resource "aws_sns_topic" "settlement_notifications" {
   name = "${local.name}-settlement-notifications"
   tags = local.common_tags
+}
+
+module "monitoring" {
+  source = "../../modules/monitoring"
+
+  name                    = local.name
+  alarm_topic_arn         = aws_sns_topic.settlement_notifications.arn
+  alarm_email             = var.alarm_email
+  alb_arn_suffix          = module.alb.arn_suffix
+  target_group_arn_suffix = module.alb.target_group_arn_suffix
+  ecs_cluster_name        = module.ecs_cluster.cluster_name
+  ecs_service_name        = module.ecs_service_api.service_name
+  rds_instance_id         = module.rds.instance_id
+  sqs_dlq_name            = module.sqs_settlement_tasks.dlq_name
+  tags                    = local.common_tags
 }
 
 module "sfn_settlement_reconciliation" {

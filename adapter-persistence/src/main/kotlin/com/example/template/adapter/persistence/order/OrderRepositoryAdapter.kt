@@ -22,7 +22,7 @@ private const val SELECT_ORDER_SQL = """
     SELECT id, customer_id, recipient_name, postal_code, prefecture, city, address_line1, address_line2,
            status_type, status_paid_at, status_fulfilling_started_at, status_tracking_number,
            status_delivered_at, status_cancelled_reason, status_refunded_at,
-           status_refunded_amount_minor, status_refunded_amount_currency
+           status_refunded_amount_minor, status_refunded_amount_currency, version
     FROM orders
     WHERE id = :id
 """
@@ -39,12 +39,12 @@ private const val UPSERT_ORDER_SQL = """
         id, customer_id, recipient_name, postal_code, prefecture, city, address_line1, address_line2,
         status_type, status_paid_at, status_fulfilling_started_at, status_tracking_number,
         status_delivered_at, status_cancelled_reason, status_refunded_at,
-        status_refunded_amount_minor, status_refunded_amount_currency
+        status_refunded_amount_minor, status_refunded_amount_currency, version
     ) VALUES (
         :id, :customerId, :recipientName, :postalCode, :prefecture, :city, :addressLine1, :addressLine2,
         :statusType, :statusPaidAt, :statusFulfillingStartedAt, :statusTrackingNumber,
         :statusDeliveredAt, :statusCancelledReason, :statusRefundedAt,
-        :statusRefundedAmountMinor, :statusRefundedAmountCurrency
+        :statusRefundedAmountMinor, :statusRefundedAmountCurrency, :initialVersion
     )
     ON CONFLICT (id) DO UPDATE SET
         customer_id = EXCLUDED.customer_id,
@@ -62,7 +62,26 @@ private const val UPSERT_ORDER_SQL = """
         status_cancelled_reason = EXCLUDED.status_cancelled_reason,
         status_refunded_at = EXCLUDED.status_refunded_at,
         status_refunded_amount_minor = EXCLUDED.status_refunded_amount_minor,
-        status_refunded_amount_currency = EXCLUDED.status_refunded_amount_currency
+        status_refunded_amount_currency = EXCLUDED.status_refunded_amount_currency,
+        version = orders.version + 1
+    WHERE orders.version = :expectedVersion
+    RETURNING version
+"""
+
+private const val SELECT_ORDER_PAGE_FIRST_SQL = """
+    WITH page AS (SELECT * FROM orders ORDER BY id LIMIT :limit)
+    SELECT page.*, lines.line_no, lines.sku, lines.quantity, lines.unit_price_minor, lines.unit_price_currency
+    FROM page
+    LEFT JOIN order_lines lines ON lines.order_id = page.id
+    ORDER BY page.id, lines.line_no
+"""
+
+private const val SELECT_ORDER_PAGE_AFTER_SQL = """
+    WITH page AS (SELECT * FROM orders WHERE id > :after ORDER BY id LIMIT :limit)
+    SELECT page.*, lines.line_no, lines.sku, lines.quantity, lines.unit_price_minor, lines.unit_price_currency
+    FROM page
+    LEFT JOIN order_lines lines ON lines.order_id = page.id
+    ORDER BY page.id, lines.line_no
 """
 
 private const val DELETE_ORDER_LINES_SQL = "DELETE FROM order_lines WHERE order_id = :orderId"
@@ -108,6 +127,20 @@ class OrderRepositoryAdapter(
             toDomainOrder(orderRow, lineRows).bind()
         }
 
+    override suspend fun findPage(
+        after: OrderId?,
+        limit: Int,
+    ): Either<OrderError, List<Order>> =
+        either {
+            val rows = fetchOrderPageRows(after, limit).bind()
+            rows
+                .groupBy { (order, _) -> order.id }
+                .values
+                .map { aggregateRows ->
+                    toDomainOrder(aggregateRows.first().first, aggregateRows.mapNotNull { it.second }).bind()
+                }
+        }
+
     override suspend fun save(order: Order): Either<OrderError, Order> =
         // ##### 例外の世界から Either の世界への変換境界 #####
         // ドライバ (r2dbc-postgresql) が投げうる例外 (接続不可・一意制約違反等) は
@@ -115,11 +148,16 @@ class OrderRepositoryAdapter(
         Either
             .catch {
                 transactionalOperator.executeAndAwait {
-                    upsertOrderRow(order)
+                    val persistedVersion = upsertOrderRow(order)
                     replaceOrderLines(order)
+                    order.copy(version = persistedVersion)
                 }
-                order
-            }.mapLeft { OrderError.RepositoryUnavailable(it.describeForRepository()) }
+            }.mapLeft {
+                when (it) {
+                    is OptimisticLockException -> OrderError.ConcurrentModification(order.id)
+                    else -> OrderError.RepositoryUnavailable(it.describeForRepository())
+                }
+            }
 
     private suspend fun fetchOrderRow(id: OrderId): Either<OrderError, OrderRow?> =
         Either
@@ -142,9 +180,28 @@ class OrderRepositoryAdapter(
                     .toList()
             }.mapLeft { OrderError.RepositoryUnavailable(it.describeForRepository()) }
 
-    private suspend fun upsertOrderRow(order: Order) {
+    private suspend fun fetchOrderPageRows(
+        after: OrderId?,
+        limit: Int,
+    ): Either<OrderError, List<Pair<OrderRow, OrderLineRow?>>> =
+        Either
+            .catch {
+                val spec =
+                    if (after == null) {
+                        databaseClient.sql(SELECT_ORDER_PAGE_FIRST_SQL)
+                    } else {
+                        databaseClient.sql(SELECT_ORDER_PAGE_AFTER_SQL).bind("after", after.value)
+                    }
+                spec
+                    .bind("limit", limit)
+                    .map { row, _ -> row.toOrderRow() to row.toOrderLineRowOrNull() }
+                    .flow()
+                    .toList()
+            }.mapLeft { OrderError.RepositoryUnavailable(it.describeForRepository()) }
+
+    private suspend fun upsertOrderRow(order: Order): Long {
         val columns = order.status.toColumns()
-        databaseClient
+        return databaseClient
             .sql(UPSERT_ORDER_SQL)
             .bind("id", order.id.value)
             .bind("customerId", order.customerId.value)
@@ -163,8 +220,11 @@ class OrderRepositoryAdapter(
             .bindNullable("statusRefundedAt", columns.refundedAt, Instant::class.java)
             .bindNullable("statusRefundedAmountMinor", columns.refundedAmountMinor, Long::class.javaObjectType)
             .bindNullable("statusRefundedAmountCurrency", columns.refundedAmountCurrency, String::class.java)
-            .fetch()
-            .awaitRowsUpdated()
+            .bind("initialVersion", 0L)
+            .bind("expectedVersion", order.version)
+            .map { row, _ -> row.get("version", Long::class.javaObjectType)!! }
+            .awaitOneOrNull()
+            ?: throw OptimisticLockException()
     }
 
     private suspend fun replaceOrderLines(order: Order) {
@@ -188,3 +248,5 @@ class OrderRepositoryAdapter(
         }
     }
 }
+
+private class OptimisticLockException : RuntimeException()

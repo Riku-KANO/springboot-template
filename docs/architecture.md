@@ -160,6 +160,25 @@ sequenceDiagram
 ここでブロッキングしてもアプリ全体のスループットには影響しない
 (WebFlux 側のイベントループと混同しないこと)。
 
+## AWSの実行・デプロイ構成
+
+```mermaid
+flowchart LR
+    Client --> DNS["Route 53"] --> ALB["ALB / ACM HTTPS"]
+    ALB --> API["ECS Fargate API"] --> RDS["RDS PostgreSQL"]
+    API --> Metrics["Prometheus endpoint"]
+    ALB --> Alarms["CloudWatch alarms / SNS"]
+    API --> OTel["Micrometer + OpenTelemetry"]
+    Deploy["GitHub Actions OIDC"] --> ECR["ECR SHA image"]
+    Deploy --> Migration["ECS Flyway migration task"] --> RDS
+    Deploy --> API
+```
+
+TerraformはALB/DNS/ECS/RDSと監視の土台を管理し、GitHub Actionsはtask definitionの
+イメージrevisionを管理する。ECS serviceの`task_definition`はTerraformの
+`ignore_changes`対象で、applyがCIでデプロイ済みのSHA imageを`:latest`へ戻さない。
+デプロイはmigration taskの成功後にだけAPIを更新し、最後にreadiness endpointを確認する。
+
 ## さらに詳しく
 
 - `docs/arrow-style-guide.md` --- Either/EitherNel の使い分け、`.bindNel()` の罠、optics。

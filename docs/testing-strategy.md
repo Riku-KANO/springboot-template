@@ -12,16 +12,17 @@
 に自前実装がある。他モジュールのテストは `testImplementation(testFixtures(project(":domain")))`
 でこれを再利用する。
 
-## テストの内訳 (150 件、0 failures)
+## テストの内訳 (160 件、0 failures)
 
 | モジュール | 件数 | 何を検証しているか |
 |---|---|---|
 | `:domain` | 48 | 値オブジェクトのスマートコンストラクタ、`OrderTransitions` の状態遷移 (`else` を書かないことで保証される網羅性)、`reconcile` の判定ロジック、`@optics` の Lens/Traversal |
-| `:application` | 45 | ユースケースのオーケストレーション (mockk でポートをモック)、累積バリデーション (`CreateOrderCommandTest` の `mapOrAccumulate`/`bindNel` の挙動)、`SubmitOrderForPayment`/`StartFulfillment`/`DeliverOrder`/`RefundOrder` を含む注文ライフサイクル一巡の検証 (`OrderLifecycleTest`) |
-| `:adapter-persistence` | 17 | R2DBC マッピング、Flyway マイグレーション適用、`R2dbcTxRunner` のロールバック挙動 (Testcontainers Postgres) |
-| `:adapter-web` | 30 | `OrderController` の HTTP 契約 (`submit`/`start-fulfillment`/`deliver`/`refund` を含む全エンドポイント)、`DomainErrorProblemMapper` の2つの `when` の網羅性、`SecurityConfig`/`RequestIdWebFilter` |
-| `:adapter-messaging` | 8 | `SfnTaskCallbackAdapter`/`S3SettlementFileAdapter` (Testcontainers LocalStack) |
+| `:application` | 46 | ユースケースのオーケストレーション、累積バリデーション、cursor pagination、注文ライフサイクル一巡 |
+| `:adapter-persistence` | 19 | R2DBC マッピング、楽観ロック、cursor検索、Flyway、`R2dbcTxRunner` のロールバック (Testcontainers Postgres) |
+| `:adapter-web` | 34 | 全HTTP契約、一覧の境界値、エラーマッピング、OAuth2 scope認可、`RequestIdWebFilter` |
+| `:adapter-messaging` | 10 | 必須設定の起動時validation、`SfnTaskCallbackAdapter`/`S3SettlementFileAdapter` (Testcontainers LocalStack) |
 | `:batch` | 2 | `settlementReconciliationJob` の end-to-end 実行 (Testcontainers Postgres) |
+| `:bootstrap` | 1 | composition rootを全て組み立て、実Postgresで起動・作成・参照するスモークテスト |
 
 ## 何が Spring コンテキストを必要とし、何が不要か
 
