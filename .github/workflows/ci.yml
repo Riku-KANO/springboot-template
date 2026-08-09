@@ -52,7 +52,7 @@ jobs:
       - name: Publish test report
         # ビルドやテストが失敗した場合でもレポートは必ず публish する。
         if: always()
-        uses: dorny/test-reporter@v1
+        uses: dorny/test-reporter@v3
         with:
           name: JUnit tests (domain/application/adapter-*/batch/bootstrap)
           path: "**/build/test-results/test/TEST-*.xml"
