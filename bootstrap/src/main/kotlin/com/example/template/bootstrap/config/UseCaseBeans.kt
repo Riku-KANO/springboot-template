@@ -14,6 +14,8 @@ import com.example.template.application.order.DeliverOrder
 import com.example.template.application.order.DeliverOrderService
 import com.example.template.application.order.FindOrder
 import com.example.template.application.order.FindOrderService
+import com.example.template.application.order.ListOrders
+import com.example.template.application.order.ListOrdersService
 import com.example.template.application.order.PayOrder
 import com.example.template.application.order.PayOrderService
 import com.example.template.application.order.RefundOrder
@@ -47,6 +49,7 @@ fun useCaseBeans() =
     beans {
         bean<CreateOrder> { CreateOrderService(ref()) }
         bean<FindOrder> { FindOrderService(ref()) }
+        bean<ListOrders> { ListOrdersService(ref()) }
         bean<SubmitOrderForPayment> { SubmitOrderForPaymentService(ref(), ref()) }
         bean<PayOrder> { PayOrderService(ref(), ref(), ref()) }
         bean<StartFulfillment> { StartFulfillmentService(ref(), ref()) }

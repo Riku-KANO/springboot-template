@@ -69,9 +69,9 @@ class OrderRepositoryAdapterTest : PostgresIntegrationTest() {
 
     private suspend fun assertRoundTrips(order: Order) {
         val saved = repository.save(order).shouldBeRight()
-        assertEquals(order, saved)
+        assertEquals(order.copy(version = 0), saved)
         val loaded = repository.findById(order.id).shouldBeRight()
-        assertEquals(order, loaded)
+        assertEquals(saved, loaded)
     }
 
     @Test
@@ -134,7 +134,7 @@ class OrderRepositoryAdapterTest : PostgresIntegrationTest() {
     fun `save replaces the full set of order_lines on a subsequent call (upsert semantics)`() =
         runTest {
             val original = newOrder(OrderStatus.Draft)
-            repository.save(original).shouldBeRight()
+            val persisted = repository.save(original).shouldBeRight()
 
             // 明細を2件 -> 1件に差し替える。差分更新ではなく「全消去してから書き直す」
             // 実装であれば、古い2件目の明細 (SKU-2) が残ってしまうことはない。
@@ -143,11 +143,45 @@ class OrderRepositoryAdapterTest : PostgresIntegrationTest() {
                     OrderLine.createFailFast("SKU-ONLY", 3, 700, jpy).shouldBeRight(),
                     emptyList(),
                 )
-            val updated = original.copy(lines = singleLine)
-            repository.save(updated).shouldBeRight()
+            val updated = persisted.copy(lines = singleLine)
+            val saved = repository.save(updated).shouldBeRight()
 
             val loaded = repository.findById(original.id).shouldBeRight()
-            assertEquals(updated, loaded)
+            assertEquals(saved, loaded)
             assertEquals(1, loaded.lines.all.size)
+        }
+
+    @Test
+    fun `stale version cannot overwrite a concurrently updated order`() =
+        runTest {
+            val firstSnapshot = repository.save(newOrder(OrderStatus.Draft)).shouldBeRight()
+            val secondSnapshot = repository.findById(firstSnapshot.id).shouldBeRight()
+
+            val updated = repository.save(firstSnapshot.copy(status = OrderStatus.PendingPayment)).shouldBeRight()
+            assertEquals(1, updated.version)
+
+            val error =
+                repository
+                    .save(secondSnapshot.copy(status = OrderStatus.Cancelled("stale writer")))
+                    .shouldBeLeftOfType<OrderError.ConcurrentModification>()
+            assertEquals(firstSnapshot.id, error.orderId)
+            assertEquals(updated, repository.findById(firstSnapshot.id).shouldBeRight())
+        }
+
+    @Test
+    fun `findPage uses stable ID cursor ordering`() =
+        runTest {
+            val prefix = UUID.randomUUID().toString()
+            val orders =
+                listOf("3", "1", "2").map { suffix ->
+                    newOrder(OrderStatus.Draft).copy(id = OrderId.create("order-$prefix-$suffix").shouldBeRight())
+                }
+            orders.forEach { repository.save(it).shouldBeRight() }
+
+            // テストDBはクラス間で共有されるため、専用prefixの範囲をcursorで直接確認する。
+            val after = OrderId.create("order-$prefix-1").shouldBeRight()
+            val page = repository.findPage(after, 100).shouldBeRight().filter { it.id.value.startsWith("order-$prefix-") }
+
+            assertEquals(listOf("order-$prefix-2", "order-$prefix-3"), page.map { it.id.value })
         }
 }

@@ -21,7 +21,7 @@ spring:
     password: template
 
   flyway:
-    enabled: true # local は起動時に自動でマイグレーションを適用する (dev も同様、stg/prod は別デプロイ工程)
+    enabled: true # localだけは開発効率のため起動時に自動適用する。AWS環境はデプロイ工程で適用する
 
   cloud:
     aws:

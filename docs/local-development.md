@@ -36,7 +36,7 @@ docker compose -f docker/docker-compose.yml up -d
 
 `local` プロファイルは `template.security.permit-all=true` を設定しており、JWT 無しで
 全エンドポイントを叩ける (`bootstrap/.../config/LocalSecurityConfig.kt` 参照)。起動すると
-Flyway が6件のマイグレーション (Batch のメタデータ含む) を適用し、Netty が `8080` 番ポートで
+Flyway が7件のマイグレーション (Batch のメタデータ、注文version列を含む) を適用し、Netty が `8080` 番ポートで
 待ち受ける。
 
 ### 動作確認 (実際に検証済みのコマンドと応答)

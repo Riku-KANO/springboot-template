@@ -26,10 +26,22 @@ output "ecs_api_service_name" {
   value = module.ecs_service_api.service_name
 }
 
+output "ecs_batch_task_family" {
+  value = module.ecs_task_batch.family
+}
+
 output "state_machine_arn" {
   value = module.sfn_settlement_reconciliation.arn
 }
 
 output "github_actions_role_arn" {
   value = module.iam.github_actions_role_arn
+}
+
+output "github_actions_plan_role_arn" {
+  value = module.iam.github_actions_plan_role_arn
+}
+
+output "api_endpoint" {
+  value = module.alb.endpoint
 }

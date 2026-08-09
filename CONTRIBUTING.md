@@ -23,7 +23,7 @@ cd springboot-template
 ## ビルド・テスト・静的解析コマンド
 
 ```bash
-./gradlew build                       # 全モジュールのコンパイル + テスト (128件)
+./gradlew build                       # 全モジュールのコンパイル + テスト (160件)
 ./gradlew ktlintCheck spotlessCheck    # 静的解析 (このプロジェクトに detekt は無い。ADR 0009 参照)
 ./gradlew ktlintFormat                 # ktlint の自動整形
 ./gradlew :bootstrap:bootRun --args='--spring.profiles.active=local'  # ローカル起動

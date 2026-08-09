@@ -57,7 +57,7 @@ internal fun toDomainOrder(
         ensure(mappedLines.isNotEmpty()) { corruptedOrderRow(orderRow.id, "no order_lines rows found") }
         val lines = NonEmptyList(mappedLines.first(), mappedLines.drop(1))
 
-        Order(id, customerId, lines, address, status)
+        Order(id, customerId, lines, address, status, orderRow.version)
     }
 
 private fun toDomainOrderLine(

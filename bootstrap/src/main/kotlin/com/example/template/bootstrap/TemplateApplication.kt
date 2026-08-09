@@ -5,6 +5,8 @@ import com.example.template.bootstrap.config.persistenceBeans
 import com.example.template.bootstrap.config.useCaseBeans
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.runApplication
+import org.springframework.context.ApplicationContextInitializer
+import org.springframework.context.support.GenericApplicationContext
 
 /**
  * このテンプレートの composition root (アプリケーション全体を組み立てる唯一の起点)。
@@ -35,6 +37,14 @@ import org.springframework.boot.runApplication
 @SpringBootApplication(scanBasePackages = ["com.example.template"])
 class TemplateApplication
 
+class TemplateBeansInitializer : ApplicationContextInitializer<GenericApplicationContext> {
+    override fun initialize(applicationContext: GenericApplicationContext) {
+        useCaseBeans().initialize(applicationContext)
+        persistenceBeans().initialize(applicationContext)
+        paymentGatewayBeans().initialize(applicationContext)
+    }
+}
+
 fun main(args: Array<String>) {
     runApplication<TemplateApplication>(*args) {
         // :application / :adapter-persistence / (ResilientPaymentGatewayAdapter を含む)
@@ -42,6 +52,6 @@ fun main(args: Array<String>) {
         // ApplicationContextInitializer として登録する (TemplateApplication の KDoc を参照)。
         // `beans { }` が返す BeanDefinitionDsl は ApplicationContextInitializer<GenericApplicationContext>
         // を実装しており、この addInitializers(...) にそのまま渡せる。
-        addInitializers(useCaseBeans(), persistenceBeans(), paymentGatewayBeans())
+        addInitializers(TemplateBeansInitializer())
     }
 }

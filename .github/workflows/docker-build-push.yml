@@ -1,82 +1,159 @@
-# ============================================================================
-# main へのマージ時に :bootstrap の bootJar を Cloud Native Buildpacks (bootBuildImage、
-# Dockerfile レス) でコンテナイメージ化し、OIDC 経由で ECR へ push する。
-#
-# ##### 鶏と卵問題 (このワークフローを初めて動かす前に必ず読むこと)
-# このワークフローは infra/terraform/modules/iam が作る github_actions_role_arn を
-# `aws-actions/configure-aws-credentials` で assume する。つまり:
-#   1. まず infra/terraform/envs/<env> を「人手 (ローカルの AWS 認証情報、あるいは管理者ロール) で」
-#      terraform apply し、GitHub OIDC プロバイダ + github_actions_role_arn を作る
-#      (このロール自体を、まだ存在しないこのロールを使う CI から作ることはできない)。
-#   2. 出力された github_actions_role_arn / ECR リポジトリ URL / リージョンを、このリポジトリの
-#      Settings > Secrets and variables > Actions > Variables に
-#      AWS_GITHUB_ACTIONS_ROLE_ARN / ECR_REPOSITORY_URL / AWS_REGION として登録する。
-#   3. ここで初めてこのワークフローが動く。
-# 詳細な手順は docs/how-to-use-this-template.md の「OIDC ブートストラップ」を参照。
-#
-# ##### ECR タグの可変性について
-# infra/terraform/modules/ecr は stg/prod を IMMUTABLE (同一タグへの再 push を拒否) に
-# している一方、このワークフローは "latest" にも push する。dev 環境の ECR (MUTABLE) を
-# 対象にする分には問題ないが、IMMUTABLE な stg/prod の ECR リポジトリへ直接このワークフローで
-# push すると2回目以降 "latest" タグの push が失敗する。stg/prod への昇格 (特定の git sha
-# タグを選んで ECS のタスク定義を更新する) は本テンプレートの範囲外の、別のデプロイ
-# ワークフローとして用意すること (このテンプレートはビルド~ECR push までしか自動化しない)。
-# ============================================================================
-name: Docker Build & Push
+name: Build & Deploy
 
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Deployment environment
+        type: choice
+        options: [dev, stg, prod]
+        default: dev
+        required: true
 
 concurrency:
-  group: docker-build-push-${{ github.ref }}
+  group: deploy-${{ inputs.environment || 'dev' }}
   cancel-in-progress: false
 
 permissions:
   contents: read
-  id-token: write # OIDC (aws-actions/configure-aws-credentials) に必須
+  id-token: write
 
 jobs:
-  build-and-push:
-    name: bootBuildImage & push to ECR
+  deploy:
+    name: Deploy ${{ inputs.environment || 'dev' }}
     runs-on: ubuntu-latest
+    environment: ${{ inputs.environment || 'dev' }}
+    env:
+      DEPLOY_ENV: ${{ inputs.environment || 'dev' }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up JDK 17 (Temurin)
-        uses: actions/setup-java@v4
+      - name: Validate deployment source
+        run: |
+          set -euo pipefail
+          if [[ "$DEPLOY_ENV" == "prod" && "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "prod deployment is allowed only from refs/heads/main" >&2
+            exit 1
+          fi
+          if [[ "$DEPLOY_ENV" == "stg" && "$GITHUB_REF" != "refs/heads/main" && "$GITHUB_REF" != refs/tags/* ]]; then
+            echo "stg deployment is allowed only from main or a tag" >&2
+            exit 1
+          fi
+
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v4
 
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      - name: Login to Amazon ECR
-        id: ecr-login
-        uses: aws-actions/amazon-ecr-login@v2
+      - uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Compute image tags
-        id: tags
-        run: |
-          SHA_TAG="${GITHUB_SHA::12}"
-          echo "sha_tag=${SHA_TAG}" >> "$GITHUB_OUTPUT"
+      - uses: sigstore/cosign-installer@v3
 
-      - name: bootBuildImage (Cloud Native Buildpacks, Dockerfile レス)
+      - name: Build and push immutable image
+        id: image
+        env:
+          ECR_REPOSITORY_URL: ${{ vars.ECR_REPOSITORY_URL }}
         run: |
-          ./gradlew :bootstrap:bootBuildImage \
-            --imageName="${{ vars.ECR_REPOSITORY_URL }}:${{ steps.tags.outputs.sha_tag }}" \
-            --stacktrace
+          set -euo pipefail
+          IMAGE_URI="${ECR_REPOSITORY_URL}:${GITHUB_SHA::12}"
+          ./gradlew :bootstrap:bootBuildImage --imageName="${IMAGE_URI}" --stacktrace
+          docker push "${IMAGE_URI}"
+          echo "uri=${IMAGE_URI}" >> "$GITHUB_OUTPUT"
 
-      - name: Tag & push (git sha + latest)
+      - name: Generate CycloneDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ steps.image.outputs.uri }}
+          format: cyclonedx-json
+          output-file: sbom.cdx.json
+          upload-artifact: true
+
+      - name: Scan image for high severity vulnerabilities
+        uses: anchore/scan-action@v6
+        with:
+          image: ${{ steps.image.outputs.uri }}
+          severity-cutoff: high
+          fail-build: true
+
+      - name: Sign verified image and attach SBOM attestation
+        env:
+          IMAGE_URI: ${{ steps.image.outputs.uri }}
         run: |
-          docker tag "${{ vars.ECR_REPOSITORY_URL }}:${{ steps.tags.outputs.sha_tag }}" "${{ vars.ECR_REPOSITORY_URL }}:latest"
-          docker push "${{ vars.ECR_REPOSITORY_URL }}:${{ steps.tags.outputs.sha_tag }}"
-          docker push "${{ vars.ECR_REPOSITORY_URL }}:latest"
+          cosign sign --yes "$IMAGE_URI"
+          cosign attest --yes --predicate sbom.cdx.json --type cyclonedx "$IMAGE_URI"
+
+      - name: Register migration task definition
+        id: migration-task
+        env:
+          IMAGE_URI: ${{ steps.image.outputs.uri }}
+          ECS_BATCH_TASK_FAMILY: ${{ vars.ECS_BATCH_TASK_FAMILY }}
+        run: |
+          set -euo pipefail
+          aws ecs describe-task-definition --task-definition "$ECS_BATCH_TASK_FAMILY" --query taskDefinition > task-definition.json
+          jq --arg image "$IMAGE_URI" '
+            del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)
+            | .containerDefinitions |= map(if .name == "batch" then .image = $image else . end)
+          ' task-definition.json > migration-task-definition.json
+          TASK_ARN=$(aws ecs register-task-definition --cli-input-json file://migration-task-definition.json --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "arn=${TASK_ARN}" >> "$GITHUB_OUTPUT"
+
+      - name: Run Flyway migration
+        env:
+          ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+          ECS_API_SERVICE: ${{ vars.ECS_API_SERVICE }}
+          MIGRATION_TASK_ARN: ${{ steps.migration-task.outputs.arn }}
+        run: |
+          set -euo pipefail
+          NETWORK=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_API_SERVICE" --query 'services[0].networkConfiguration' --output json)
+          OVERRIDES=$(jq -n --arg profile "${DEPLOY_ENV},migration" '{containerOverrides:[{name:"batch",environment:[{name:"SPRING_PROFILES_ACTIVE",value:$profile}]}]}')
+          TASK_ARN=$(aws ecs run-task \
+            --cluster "$ECS_CLUSTER" \
+            --launch-type FARGATE \
+            --task-definition "$MIGRATION_TASK_ARN" \
+            --network-configuration "$NETWORK" \
+            --overrides "$OVERRIDES" \
+            --query 'tasks[0].taskArn' --output text)
+          aws ecs wait tasks-stopped --cluster "$ECS_CLUSTER" --tasks "$TASK_ARN"
+          EXIT_CODE=$(aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$TASK_ARN" --query 'tasks[0].containers[0].exitCode' --output text)
+          test "$EXIT_CODE" = "0"
+
+      - name: Register API task definition
+        id: api-task
+        env:
+          IMAGE_URI: ${{ steps.image.outputs.uri }}
+          ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+          ECS_API_SERVICE: ${{ vars.ECS_API_SERVICE }}
+        run: |
+          set -euo pipefail
+          CURRENT_TASK=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_API_SERVICE" --query 'services[0].taskDefinition' --output text)
+          aws ecs describe-task-definition --task-definition "$CURRENT_TASK" --query taskDefinition > task-definition.json
+          jq --arg image "$IMAGE_URI" '
+            del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)
+            | .containerDefinitions |= map(if .name == "api" then .image = $image else . end)
+          ' task-definition.json > api-task-definition.json
+          TASK_ARN=$(aws ecs register-task-definition --cli-input-json file://api-task-definition.json --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "arn=${TASK_ARN}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy API and wait until stable
+        env:
+          ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+          ECS_API_SERVICE: ${{ vars.ECS_API_SERVICE }}
+          API_TASK_ARN: ${{ steps.api-task.outputs.arn }}
+        run: |
+          set -euo pipefail
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_API_SERVICE" --task-definition "$API_TASK_ARN"
+          aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_API_SERVICE"
+
+      - name: Smoke test
+        env:
+          API_ENDPOINT: ${{ vars.API_ENDPOINT }}
+        run: curl --fail --show-error --retry 12 --retry-all-errors --retry-delay 5 "${API_ENDPOINT}/actuator/health/readiness"

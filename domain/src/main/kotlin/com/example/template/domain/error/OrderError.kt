@@ -39,6 +39,13 @@ sealed interface OrderError : DomainError {
         override val message: String = "cannot perform '$attempted' while order is in status $from"
     }
 
+    data class ConcurrentModification(
+        val orderId: OrderId,
+    ) : OrderError,
+        ConflictError {
+        override val message: String = "order was modified concurrently: ${orderId.value}"
+    }
+
     /** 決済ゲートウェイ等、外部インフラとの連携失敗。:application 層のポート実装から返される想定。 */
     data class PaymentGatewayUnavailable(
         val cause: String,

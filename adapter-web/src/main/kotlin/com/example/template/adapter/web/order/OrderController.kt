@@ -6,6 +6,7 @@ import arrow.core.raise.either
 import arrow.core.toNonEmptyListOrNull
 import com.example.template.adapter.web.order.dto.CancelOrderRequest
 import com.example.template.adapter.web.order.dto.CreateOrderRequest
+import com.example.template.adapter.web.order.dto.OrderPageResponse
 import com.example.template.adapter.web.order.dto.RefundOrderRequest
 import com.example.template.adapter.web.order.dto.ShipOrderRequest
 import com.example.template.adapter.web.problem.DomainErrorProblemMapper
@@ -18,6 +19,8 @@ import com.example.template.application.order.DeliverOrder
 import com.example.template.application.order.DeliverOrderCommand
 import com.example.template.application.order.FindOrder
 import com.example.template.application.order.FindOrderQuery
+import com.example.template.application.order.ListOrders
+import com.example.template.application.order.ListOrdersQuery
 import com.example.template.application.order.PayOrder
 import com.example.template.application.order.PayOrderCommand
 import com.example.template.application.order.RefundOrder
@@ -41,6 +44,7 @@ import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.server.ServerWebExchange
 import java.util.Currency
@@ -64,6 +68,7 @@ import java.util.Currency
 class OrderController(
     private val createOrder: CreateOrder,
     private val findOrder: FindOrder,
+    private val listOrders: ListOrders,
     private val submitOrderForPayment: SubmitOrderForPayment,
     private val payOrder: PayOrder,
     private val startFulfillment: StartFulfillment,
@@ -73,6 +78,24 @@ class OrderController(
     private val refundOrder: RefundOrder,
     private val problemMapper: DomainErrorProblemMapper,
 ) {
+    @GetMapping
+    suspend fun list(
+        @RequestParam(required = false) after: String?,
+        @RequestParam(defaultValue = "20") limit: Int,
+        exchange: ServerWebExchange,
+    ): ResponseEntity<*> {
+        if (limit !in 1..100) {
+            return problemMapper.badRequest("PAGE_LIMIT_INVALID", "error.request.page-limit.invalid", exchange.apiLocale())
+        }
+        return either {
+            val cursor = after?.let { OrderId.create(it).bind() }
+            listOrders(ListOrdersQuery(cursor, limit)).bind()
+        }.fold(
+            { problemMapper.toProblemDetailResponse(it, exchange.apiLocale()) },
+            { page -> ResponseEntity.ok(OrderPageResponse(page.items.map { it.toResponse() }, page.nextCursor?.value)) },
+        )
+    }
+
     /**
      * 注文作成。ヘッドライン機能である「累積バリデーション」をここで実演する。
      * orderId・customerId・明細の3軸すべてが不正な場合、[CreateOrderCommand.create] の

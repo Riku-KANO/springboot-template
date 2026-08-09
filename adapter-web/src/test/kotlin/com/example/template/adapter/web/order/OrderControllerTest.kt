@@ -8,6 +8,8 @@ import com.example.template.application.order.CancelOrder
 import com.example.template.application.order.CreateOrder
 import com.example.template.application.order.DeliverOrder
 import com.example.template.application.order.FindOrder
+import com.example.template.application.order.ListOrders
+import com.example.template.application.order.OrderPage
 import com.example.template.application.order.PayOrder
 import com.example.template.application.order.RefundOrder
 import com.example.template.application.order.ShipOrder
@@ -70,6 +72,9 @@ class OrderControllerTest {
     lateinit var findOrder: FindOrder
 
     @Autowired
+    lateinit var listOrders: ListOrders
+
+    @Autowired
     lateinit var submitOrderForPayment: SubmitOrderForPayment
 
     @Autowired
@@ -97,6 +102,9 @@ class OrderControllerTest {
 
         @Bean
         fun findOrder(): FindOrder = mockk()
+
+        @Bean
+        fun listOrders(): ListOrders = mockk()
 
         @Bean
         fun submitOrderForPayment(): SubmitOrderForPayment = mockk()
@@ -276,6 +284,37 @@ class OrderControllerTest {
             .expectBody()
             .jsonPath("$.id")
             .isEqualTo("order-1")
+    }
+
+    @Test
+    fun `list returns items and a stable ID cursor`() {
+        val order = sampleOrder()
+        coEvery { listOrders(any()) } returns OrderPage(listOf(order), order.id).right()
+
+        webTestClient
+            .get()
+            .uri("/orders?limit=1")
+            .exchange()
+            .expectStatus()
+            .isOk
+            .expectBody()
+            .jsonPath("$.items[0].id")
+            .isEqualTo("order-1")
+            .jsonPath("$.nextCursor")
+            .isEqualTo("order-1")
+    }
+
+    @Test
+    fun `list rejects a limit outside the supported range`() {
+        webTestClient
+            .get()
+            .uri("/orders?limit=101")
+            .exchange()
+            .expectStatus()
+            .isBadRequest
+            .expectBody()
+            .jsonPath("$.code")
+            .isEqualTo("PAGE_LIMIT_INVALID")
     }
 
     @Test

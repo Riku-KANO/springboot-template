@@ -34,3 +34,11 @@ settlement_dispatch_pattern = "ecs_run_task"
 
 github_repository        = "your-org/springboot-template" # 要: 実際の "org/repo" に置き換える
 github_oidc_allowed_refs = ["refs/heads/main", "refs/tags/*"]
+
+terraform_state_bucket_name = "template-terraform-state-EXAMPLE_ACCOUNT_ID"
+terraform_lock_table_name   = "template-terraform-locks"
+
+# api_certificate_arn = "arn:aws:acm:ap-northeast-1:123456789012:certificate/REPLACE_ME"
+# api_hosted_zone_id  = "Z_REPLACE_ME"
+# api_domain_name     = "api-stg.example.com"
+# alarm_email         = "platform@example.com"

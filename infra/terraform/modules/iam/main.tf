@@ -282,7 +282,10 @@ data "aws_iam_policy_document" "github_actions_assume_role" {
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = [for ref in var.github_oidc_allowed_refs : "repo:${var.github_repository}:ref:${ref}"]
+      values = concat(
+        [for ref in var.github_oidc_allowed_refs : "repo:${var.github_repository}:ref:${ref}"],
+        [for environment in var.github_oidc_allowed_environments : "repo:${var.github_repository}:environment:${environment}"],
+      )
     }
   }
 }
@@ -311,8 +314,35 @@ data "aws_iam_policy_document" "github_actions_policy" {
       "ecr:CompleteLayerUpload",
       "ecr:PutImage",
       "ecr:BatchGetImage",
+      "ecr:GetDownloadUrlForLayer",
+      "ecr:DescribeImages",
     ]
     resources = [var.ecr_repository_arn]
+  }
+
+  statement {
+    sid    = "DeployEcsServiceAndMigration"
+    effect = "Allow"
+    actions = [
+      "ecs:DescribeTaskDefinition",
+      "ecs:RegisterTaskDefinition",
+      "ecs:DescribeServices",
+      "ecs:UpdateService",
+      "ecs:RunTask",
+      "ecs:DescribeTasks",
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    sid     = "PassEcsTaskRolesForDeployment"
+    effect  = "Allow"
+    actions = ["iam:PassRole"]
+    resources = [
+      aws_iam_role.ecs_task_execution.arn,
+      aws_iam_role.ecs_api_task.arn,
+      aws_iam_role.ecs_batch_task.arn,
+    ]
   }
 }
 
@@ -320,4 +350,58 @@ resource "aws_iam_role_policy" "github_actions" {
   name   = "ecr-push"
   role   = aws_iam_role.github_actions.id
   policy = data.aws_iam_policy_document.github_actions_policy.json
+}
+
+# deployロールと分離したTerraform plan専用ロール。AWS resourceは参照のみ、
+# remote stateは読み取りとDynamoDB lock操作だけを許可し、apply権限は持たせない。
+resource "aws_iam_role" "github_actions_plan" {
+  name               = "${var.name}-github-actions-plan-oidc"
+  assume_role_policy = data.aws_iam_policy_document.github_actions_assume_role.json
+  tags               = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "github_actions_plan_view_only" {
+  role       = aws_iam_role.github_actions_plan.name
+  policy_arn = "arn:aws:iam::aws:policy/job-function/ViewOnlyAccess"
+}
+
+data "aws_iam_policy_document" "github_actions_plan_state" {
+  statement {
+    sid       = "ListTerraformStateBucket"
+    effect    = "Allow"
+    actions   = ["s3:ListBucket"]
+    resources = [var.terraform_state_bucket_arn]
+  }
+
+  statement {
+    sid       = "ReadTerraformState"
+    effect    = "Allow"
+    actions   = ["s3:GetObject"]
+    resources = ["${var.terraform_state_bucket_arn}/*"]
+  }
+
+  statement {
+    sid    = "LockTerraformState"
+    effect = "Allow"
+    actions = [
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+      "dynamodb:DeleteItem",
+    ]
+    resources = [var.terraform_lock_table_arn]
+  }
+
+  statement {
+    sid       = "ReadManagedDatabaseSecretForRefresh"
+    effect    = "Allow"
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = [var.db_secret_arn]
+  }
+}
+
+resource "aws_iam_role_policy" "github_actions_plan_state" {
+  name   = "terraform-plan-state"
+  role   = aws_iam_role.github_actions_plan.id
+  policy = data.aws_iam_policy_document.github_actions_plan_state.json
 }

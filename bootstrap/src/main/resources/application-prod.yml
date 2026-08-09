@@ -44,15 +44,13 @@ management:
   endpoints:
     web:
       exposure:
-        include: health # info すら公開しない。actuator を厳格にロックダウンする
+        include: health,prometheus # prometheusはSecurityConfigにより認証必須
   endpoint:
     health:
       show-details: never # 認証済みであっても内部構成の詳細 (DB URL 等) を露出させない
   tracing:
     sampling:
-      # 本番はトレースのサンプリング率を下げる。ただし本テンプレートは実際のトレーサー実装
-      # (micrometer-tracing-bridge-otel 等) を導入していないため、このプロパティは
-      # 将来トレーシングを追加する際の設定場所を示すプレースホルダに留まる。
+      # Micrometer Tracing + OpenTelemetry の本番サンプリング率。
       probability: 0.1
 
 logging:

@@ -70,6 +70,7 @@ class ReconcileSettlementService(
             is OrderError.RepositoryUnavailable -> SettlementError.InfrastructureFailure(cause)
             is OrderError.InvalidOrderLine -> SettlementError.InfrastructureFailure(message)
             is OrderError.InvalidTransition -> SettlementError.InfrastructureFailure(message)
+            is OrderError.ConcurrentModification -> SettlementError.InfrastructureFailure(message)
             is OrderError.PaymentGatewayUnavailable -> SettlementError.InfrastructureFailure(message)
         }
 }

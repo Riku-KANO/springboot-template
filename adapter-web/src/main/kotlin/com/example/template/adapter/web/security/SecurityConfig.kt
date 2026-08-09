@@ -2,6 +2,7 @@ package com.example.template.adapter.web.security
 
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.http.HttpMethod
 import org.springframework.security.config.Customizer.withDefaults
 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity
 import org.springframework.security.config.web.server.ServerHttpSecurity
@@ -46,6 +47,10 @@ class SecurityConfig {
                 exchange
                     .pathMatchers("/actuator/health/**", "/actuator/info")
                     .permitAll()
+                    .pathMatchers(HttpMethod.GET, "/orders/**")
+                    .hasAuthority("SCOPE_orders.read")
+                    .pathMatchers("/orders/**")
+                    .hasAuthority("SCOPE_orders.write")
                     .anyExchange()
                     .authenticated()
             }.oauth2ResourceServer { it.jwt(withDefaults()) }

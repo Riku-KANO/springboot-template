@@ -20,7 +20,10 @@ Code・CI/CD までを一通り揃えています。
 - Gradle のモジュール分割による、実行時チェッカー無しでのヘキサゴナルアーキテクチャの強制
 - Spring Batch 6 + JDBC/R2DBC デュアル接続構成
 - Step Functions の `.waitForTaskToken` パターン (SQS 版・ECS RunTask 版の両方)
-- Terraform によるマルチ環境 (dev/stg/prod) の Infrastructure as Code
+- cursor pagination、楽観ロック、OAuth2 scope 認可を含む実運用向け API パターン
+- Prometheus metrics + OpenTelemetry tracing、構造化ログ、readiness/liveness probe
+- Terraform による ALB/HTTPS/DNS/監視を含むマルチ環境 (dev/stg/prod) の Infrastructure as Code
+- SHA 固定イメージ、Flyway migration task、SBOM/署名/脆弱性検査を含むデプロイパイプライン
 
 ## スタック
 
@@ -98,6 +101,12 @@ curl -s -i -X POST http://localhost:8080/orders \
 # HTTP/1.1 201 Created
 
 curl -s http://localhost:8080/orders/order-0001
+
+# ID cursorで一覧取得 (limit: 1..100)
+curl -s 'http://localhost:8080/orders?limit=20'
+
+# Prometheus形式のメトリクス
+curl -s http://localhost:8080/actuator/prometheus
 ```
 
 Swagger UI: `http://localhost:8080/swagger-ui.html`。より詳しい手順 (累積バリデーションの
@@ -130,7 +139,7 @@ LocalStack Community が ECS を未サポートのためローカルでは検証
 ## ビルド・テスト
 
 ```bash
-./gradlew build                     # 全モジュールのビルド + テスト (150件, 0 failures)
+./gradlew build                     # 全モジュールのビルド + テスト (160件, 0 failures)
 ./gradlew ktlintCheck spotlessCheck # 静的解析
 ```
 
@@ -138,8 +147,8 @@ LocalStack Community が ECS を未サポートのためローカルでは検証
 
 ```
 infra/terraform/
-├── modules/          network, rds-postgres, ecr, ecs-cluster, ecs-service, ecs-task,
-│                      s3-bucket, sqs-queue, sfn-state-machine, iam
+├── modules/          network, alb, rds-postgres, ecr, ecs-cluster, ecs-service, ecs-task,
+│                      s3-bucket, sqs-queue, sfn-state-machine, iam, monitoring
 ├── envs/{dev,stg,prod}/  独立したルートモジュール (S3 + DynamoDB リモートステート)
 └── statemachine/     Step Functions の ASL 定義 (Pattern A/B の両方)
 ```

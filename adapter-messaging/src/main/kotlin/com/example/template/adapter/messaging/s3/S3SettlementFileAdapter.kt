@@ -8,6 +8,7 @@ import com.example.template.application.port.SettlementFilePort
 import com.example.template.domain.error.SettlementError
 import com.example.template.domain.settlement.SettlementRecord
 import io.awspring.cloud.s3.S3Template
+import jakarta.validation.constraints.NotBlank
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
@@ -15,6 +16,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Configuration
 import org.springframework.stereotype.Component
+import org.springframework.validation.annotation.Validated
 import java.io.BufferedReader
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -26,9 +28,10 @@ import java.time.format.DateTimeFormatter
  * 省略時 "settlements" を既定値とする)。
  */
 @ConfigurationProperties(prefix = "settlement.s3")
+@Validated
 data class SettlementS3Properties(
-    val bucketName: String,
-    val keyPrefix: String = "settlements",
+    @field:NotBlank val bucketName: String,
+    @field:NotBlank val keyPrefix: String = "settlements",
 )
 
 /**

@@ -70,8 +70,24 @@ variable "github_oidc_allowed_refs" {
   default     = ["refs/heads/main"]
 }
 
+variable "github_oidc_allowed_environments" {
+  description = "GitHub Environment 名のリスト。environment を指定した job の OIDC sub は ref ではなく environment になるため、デプロイ先だけを明示的に許可する。"
+  type        = list(string)
+  default     = []
+}
+
 variable "ecr_repository_arn" {
   description = "GitHub Actions が push する ECR リポジトリの ARN。"
+  type        = string
+}
+
+variable "terraform_state_bucket_arn" {
+  description = "Terraform plan roleがstateを読むS3 bucket ARN。"
+  type        = string
+}
+
+variable "terraform_lock_table_arn" {
+  description = "Terraform plan roleがlockを取得するDynamoDB table ARN。"
   type        = string
 }
 

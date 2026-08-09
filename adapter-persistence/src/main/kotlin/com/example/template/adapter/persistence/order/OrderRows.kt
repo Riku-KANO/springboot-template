@@ -32,6 +32,7 @@ internal data class OrderRow(
     val statusRefundedAt: Instant?,
     val statusRefundedAmountMinor: Long?,
     val statusRefundedAmountCurrency: String?,
+    val version: Long,
 )
 
 /** order_lines テーブル1行分の生データ。設計意図は [OrderRow] のコメントと同じ。 */
@@ -62,6 +63,7 @@ internal fun Row.toOrderRow(): OrderRow =
         statusRefundedAt = get("status_refunded_at", Instant::class.java),
         statusRefundedAmountMinor = get("status_refunded_amount_minor", Long::class.javaObjectType),
         statusRefundedAmountCurrency = get("status_refunded_amount_currency", String::class.java),
+        version = requireLong("version"),
     )
 
 internal fun Row.toOrderLineRow(): OrderLineRow =
@@ -72,6 +74,8 @@ internal fun Row.toOrderLineRow(): OrderLineRow =
         unitPriceMinor = requireLong("unit_price_minor"),
         unitPriceCurrency = requireString("unit_price_currency"),
     )
+
+internal fun Row.toOrderLineRowOrNull(): OrderLineRow? = if (get("line_no", Int::class.javaObjectType) == null) null else toOrderLineRow()
 
 /*
  * NOT NULL 制約のある列を読み出すための型別ヘルパー群。R2DBC の `Row.get` は API 上
