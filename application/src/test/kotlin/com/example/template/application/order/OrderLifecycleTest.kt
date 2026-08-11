@@ -4,6 +4,7 @@ import arrow.core.Either
 import arrow.core.NonEmptyList
 import com.example.template.application.port.PaymentCharge
 import com.example.template.application.testsupport.FakeOrderRepository
+import com.example.template.application.testsupport.FakePaymentAttemptRepository
 import com.example.template.application.testsupport.FakePaymentGatewayPort
 import com.example.template.application.testsupport.RecordingTxRunner
 import com.example.template.domain.order.OrderStatus
@@ -55,7 +56,7 @@ class OrderLifecycleTest {
 
             val createOrder = CreateOrderService(repository)
             val submitOrderForPayment = SubmitOrderForPaymentService(repository, txRunner)
-            val payOrder = PayOrderService(repository, gateway, txRunner)
+            val payOrder = PayOrderService(repository, FakePaymentAttemptRepository(), gateway, txRunner)
             val startFulfillment = StartFulfillmentService(repository, txRunner, clock)
             val shipOrder = ShipOrderService(repository, txRunner)
             val deliverOrder = DeliverOrderService(repository, txRunner, clock)

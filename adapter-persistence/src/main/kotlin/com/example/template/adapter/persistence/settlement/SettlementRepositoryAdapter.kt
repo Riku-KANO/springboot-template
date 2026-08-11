@@ -11,12 +11,20 @@ import com.example.template.domain.settlement.ReconciliationOutcome
 import com.example.template.domain.settlement.SettlementRecord
 import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.r2dbc.core.awaitRowsUpdated
+import org.springframework.transaction.reactive.TransactionalOperator
+import org.springframework.transaction.reactive.executeAndAwait
 import java.time.Instant
 
 private const val MATCHED = "MATCHED"
 private const val ALREADY_SETTLED = "ALREADY_SETTLED"
 private const val AMOUNT_MISMATCH = "AMOUNT_MISMATCH"
 private const val ORDER_NOT_SETTLEABLE = "ORDER_NOT_SETTLEABLE"
+
+private const val CLAIM_RECORD_SQL = """
+    INSERT INTO settlement_record_claims (provider_transaction_id, order_id, claimed_at)
+    VALUES (:providerTransactionId, :orderId, :claimedAt)
+    ON CONFLICT (provider_transaction_id) DO NOTHING
+"""
 
 private const val INSERT_SETTLEMENT_SQL = """
     INSERT INTO settlements (
@@ -61,14 +69,13 @@ private const val INSERT_SETTLEMENT_ERROR_SQL = """
  * ReconciliationOutcome に将来バリアントが増えたとき、ここが確実にコンパイルエラーになる
  * ようにするため。
  *
- * recordOutcome は単一の INSERT 文で完結する (settlements か settlement_errors の
- * どちらか一方にしか書かない) ため、OrderRepositoryAdapter.save のような
- * 複数文をまたぐ独自トランザクション管理は不要。呼び出し元の ReconcileSettlementService が
- * 既に TxRunner でこの呼び出しごと包んでいる (findById -> reconcile -> recordOutcome を
- * 1トランザクションにする) ので、単一 INSERT 自体の原子性は Postgres が保証する範囲で十分。
+ * 最初に providerTransactionId を受領台帳へ `ON CONFLICT DO NOTHING` で登録するため、SQSや
+ * バッチ再開で同じレコードが届いても結果行は増えない。受領だけが残る中間状態を防ぐため、
+ * 受領と結果INSERTは同じR2DBCトランザクションで実行する。
  */
 class SettlementRepositoryAdapter(
     private val databaseClient: DatabaseClient,
+    private val transactionalOperator: TransactionalOperator,
 ) : SettlementRepository {
     override suspend fun recordOutcome(
         record: SettlementRecord,
@@ -78,33 +85,49 @@ class SettlementRepositoryAdapter(
         // ##### 例外の世界から Either の世界への変換境界 #####
         Either
             .catch {
-                when (outcome) {
-                    is ReconciliationOutcome.Matched -> insertSettlement(record, MATCHED, recordedAt)
-                    is ReconciliationOutcome.AlreadySettled -> insertSettlement(record, ALREADY_SETTLED, recordedAt)
-                    is ReconciliationOutcome.AmountMismatch ->
-                        insertSettlementError(
-                            record = record,
-                            recordedAt = recordedAt,
-                            outcomeType = AMOUNT_MISMATCH,
-                            expectedAmountMinor = outcome.expected.amount.value,
-                            expectedAmountCurrency = outcome.expected.currency.currencyCode,
-                            actualAmountMinor = outcome.actual.amount.value,
-                            actualAmountCurrency = outcome.actual.currency.currencyCode,
-                            orderStatusColumns = null,
-                        )
-                    is ReconciliationOutcome.OrderNotSettleable ->
-                        insertSettlementError(
-                            record = record,
-                            recordedAt = recordedAt,
-                            outcomeType = ORDER_NOT_SETTLEABLE,
-                            expectedAmountMinor = null,
-                            expectedAmountCurrency = null,
-                            actualAmountMinor = null,
-                            actualAmountCurrency = null,
-                            orderStatusColumns = outcome.status.toColumns(),
-                        )
+                transactionalOperator.executeAndAwait {
+                    if (claim(record, recordedAt)) {
+                        when (outcome) {
+                            is ReconciliationOutcome.Matched -> insertSettlement(record, MATCHED, recordedAt)
+                            is ReconciliationOutcome.AlreadySettled -> insertSettlement(record, ALREADY_SETTLED, recordedAt)
+                            is ReconciliationOutcome.AmountMismatch ->
+                                insertSettlementError(
+                                    record = record,
+                                    recordedAt = recordedAt,
+                                    outcomeType = AMOUNT_MISMATCH,
+                                    expectedAmountMinor = outcome.expected.amount.value,
+                                    expectedAmountCurrency = outcome.expected.currency.currencyCode,
+                                    actualAmountMinor = outcome.actual.amount.value,
+                                    actualAmountCurrency = outcome.actual.currency.currencyCode,
+                                    orderStatusColumns = null,
+                                )
+                            is ReconciliationOutcome.OrderNotSettleable ->
+                                insertSettlementError(
+                                    record = record,
+                                    recordedAt = recordedAt,
+                                    outcomeType = ORDER_NOT_SETTLEABLE,
+                                    expectedAmountMinor = null,
+                                    expectedAmountCurrency = null,
+                                    actualAmountMinor = null,
+                                    actualAmountCurrency = null,
+                                    orderStatusColumns = outcome.status.toColumns(),
+                                )
+                        }
+                    }
                 }
             }.mapLeft { SettlementError.InfrastructureFailure(it.describeForRepository()) }
+
+    private suspend fun claim(
+        record: SettlementRecord,
+        recordedAt: Instant,
+    ): Boolean =
+        databaseClient
+            .sql(CLAIM_RECORD_SQL)
+            .bind("providerTransactionId", record.providerTransactionId)
+            .bind("orderId", record.orderId.value)
+            .bind("claimedAt", recordedAt)
+            .fetch()
+            .awaitRowsUpdated() > 0
 
     private suspend fun insertSettlement(
         record: SettlementRecord,

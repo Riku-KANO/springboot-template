@@ -1,7 +1,6 @@
 package com.example.template.adapter.messaging.s3
 
 import arrow.core.Either
-import arrow.core.getOrNone
 import arrow.core.raise.either
 import arrow.core.raise.ensure
 import com.example.template.application.port.SettlementFilePort
@@ -11,7 +10,6 @@ import io.awspring.cloud.s3.S3Template
 import jakarta.validation.constraints.NotBlank
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.slf4j.LoggerFactory
 import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Configuration
@@ -58,11 +56,8 @@ class SettlementS3PropertiesConfig
  * (SfnTaskCallbackAdapter は SfnAsyncClient が真に非同期な CompletableFuture を返すため `.await()`
  * で済むが、こちらは同期 API しか手元にないための次善策、という違いがある)。
  *
- * 1行単位のパース失敗は [SettlementRecord.parse] が既に Either で表現しているため、
- * [SettlementFilePort] の KDoc が定める契約どおり「実際に読めた行だけ」を List で返す
- * (壊れた行は握りつぶさず warn ログには残すが、戻り値には含めない)。ファイル自体が
- * 存在しない・読み込めない、というより上位の障害だけを [SettlementError.InfrastructureFailure]
- * として Left で返す。
+ * 1行単位のパース失敗もファイル全体の Left とする。壊れた行をログだけに残して処理済みにすると、
+ * 再実行しても永久に消込されないデータ欠落になるためである。
  */
 @Component
 class S3SettlementFileAdapter(
@@ -89,23 +84,9 @@ class S3SettlementFileAdapter(
                         .mapLeft { throwable -> SettlementError.InfrastructureFailure("failed to read $location: ${throwable.message}") }
                         .bind()
 
-                lines.filter(String::isNotBlank).mapNotNull { line -> parseLineOrLogAndDrop(line, location) }
+                lines.filter(String::isNotBlank).map { line -> parseLine(line).bind() }
             }
         }
-
-    private fun parseLineOrLogAndDrop(
-        line: String,
-        location: String,
-    ): SettlementRecord? =
-        parseLine(line)
-            .getOrNone()
-            .fold(
-                {
-                    logger.warn("dropping malformed settlement record from {}: {}", location, line)
-                    null
-                },
-                { record -> record },
-            )
 
     private fun parseLine(line: String): Either<SettlementError, SettlementRecord> {
         val fields = line.split(",")
@@ -123,7 +104,6 @@ class S3SettlementFileAdapter(
     }
 
     companion object {
-        private val logger = LoggerFactory.getLogger(S3SettlementFileAdapter::class.java)
         private val DATE_FORMAT: DateTimeFormatter = DateTimeFormatter.ISO_LOCAL_DATE
         private const val EXPECTED_FIELD_COUNT = 5
     }

@@ -9,6 +9,8 @@ import kotlinx.coroutines.runBlocking
 import org.slf4j.LoggerFactory
 import org.springframework.batch.core.job.Job
 import org.springframework.batch.core.job.parameters.JobParametersBuilder
+import org.springframework.batch.core.launch.JobExecutionAlreadyRunningException
+import org.springframework.batch.core.launch.JobInstanceAlreadyCompleteException
 import org.springframework.batch.core.launch.JobOperator
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.context.properties.ConfigurationProperties
@@ -86,7 +88,14 @@ class SettlementTaskListener(
                 .toJobParameters()
 
         runCatching { jobOperator.start(settlementReconciliationJob, jobParameters) }
-            .onFailure { throwable -> reportLaunchFailure(taskToken, throwable) }
+            .onFailure { throwable ->
+                when (throwable) {
+                    is JobExecutionAlreadyRunningException,
+                    is JobInstanceAlreadyCompleteException,
+                    -> logger.info("ignoring duplicate settlement task for taskToken={}", taskToken.value)
+                    else -> reportLaunchFailure(taskToken, throwable)
+                }
+            }
     }
 
     /**

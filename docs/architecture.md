@@ -49,8 +49,9 @@ graph TD
 
 ### 依存ルールがどう強制されているか
 
-ArchUnit や Konsist のような実行時/テスト時のルールチェッカーは使っていない。理由は、
-Gradle のモジュール分割そのものが強制力を持つため必要が無いから (ADR 0003 参照)。
+Gradle のモジュール分割を第一の強制手段とし、`ArchitectureFitnessTest` (ArchUnit) を第二の
+防波堤としている。ArchUnit は domain/application から外側への依存、adapter/batch から
+composition root への依存、トップレベルslice間の循環を検出する (ADR 0003 参照)。
 `:domain`/`:application` が適用する `template.kotlin-pure` 規約 (build-logic) は
 Spring 関連の依存を一切追加しない。誰かがこの2モジュールの中で `org.springframework.*`
 を import しようとすると、それは lint 警告ではなく **コンパイルエラー** になる
@@ -89,6 +90,7 @@ sequenceDiagram
     participant UseCase as PayOrderService<br/>(application)
     participant Tx as R2dbcTxRunner<br/>(adapter-persistence)
     participant Repo as OrderRepositoryAdapter
+    participant Attempt as PaymentAttemptRepositoryAdapter
     participant Gateway as ResilientPaymentGatewayAdapter
 
     Note over Client,Controller: 事前に POST /orders/{id}/submit を呼び<br/>Draft -> PendingPayment 済みである前提
@@ -96,27 +98,31 @@ sequenceDiagram
     Filter->>Filter: requestId を発番し MDCContext を確立
     Filter->>Controller: suspend fun pay(id)
     Controller->>UseCase: invoke(PayOrderCommand)
-    UseCase->>Tx: transactional { ... }
+    UseCase->>Tx: 準備トランザクション
     Tx->>Repo: findById(orderId)
     Repo-->>Tx: Either<OrderError, Order>
-    Tx->>Gateway: charge(orderId, total)
-    Gateway-->>Tx: Either<OrderError, PaymentCharge>
-    Tx->>Tx: order.submitPayment(paidAt)
-    Tx->>Repo: save(paid)
+    Tx->>Attempt: findOrCreate(orderId, idempotencyKey, total)
+    Tx-->>UseCase: PaymentAttempt(PENDING)
+    UseCase->>Gateway: charge(orderId, total, idempotencyKey)
+    Gateway-->>UseCase: Either<OrderError, PaymentCharge>
+    UseCase->>Tx: 結果記録トランザクション
+    Tx->>Attempt: markSucceeded(idempotencyKey, charge)
+    UseCase->>Tx: 注文確定トランザクション
+    Tx->>Repo: save(order.submitPayment(paidAt))
     alt Left (途中のどこかで失敗)
         Tx->>Tx: setRollbackOnly()
-        Tx-->>Controller: Either.Left
+        UseCase-->>Controller: Either.Left
         Controller-->>Client: ProblemDetail (RFC 9457)
     else Right
-        Tx-->>Controller: Either.Right(Order)
+        UseCase-->>Controller: Either.Right(Order)
         Controller-->>Client: 200 OK + OrderResponse
     end
 ```
 
-`either { }` ブロックの中で `.bind()` した値のどれか1つでも `Left` になった時点で、
-それ以降のステップ (例えば `save`) は一切呼ばれない。`R2dbcTxRunner` は最終的な結果が
-`Left` であれば `setRollbackOnly()` を呼び、途中で書き込んだ行があってもコミットさせない
-(詳細は ADR および `docs/testing-strategy.md` の該当箇所を参照)。
+外部決済はDBロールバックで取り消せないため、DBトランザクションの外で実行する。前後を短い
+トランザクションで区切り、`payment_attempts` とプロバイダへ同じ冪等キーを渡すことで、通信切断や
+プロセス停止後の再実行を同一請求へ収束させる。決済結果は注文更新より先に永続化するため、
+注文の並行変更で補償が必要になっても成功証跡を失わない。スタブも同じ契約を実装している。
 
 ## 消込バッチフロー: Step Functions からのトリガー
 
@@ -146,7 +152,7 @@ sequenceDiagram
     S3-->>Job: List<SettlementRecord>
     loop チャンクごと (chunk size = 20)
         Job->>Job: reconcile(order, record) (domain の純粋関数)
-        Job->>DB: batch_settlement_results / batch_settlement_errors へ書き込み
+        Job->>DB: provider_transaction_idをclaimし、結果とJobInstance監査行を書き込み
     end
     Job->>Callback: SettlementJobListener.afterJob
     Callback->>SFN: SendTaskSuccess(SettlementReport) / SendTaskFailure

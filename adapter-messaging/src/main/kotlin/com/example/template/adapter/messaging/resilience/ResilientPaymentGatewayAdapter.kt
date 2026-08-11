@@ -7,6 +7,7 @@ import arrow.resilience.Schedule
 import arrow.resilience.retryEither
 import com.example.template.application.port.PaymentCharge
 import com.example.template.application.port.PaymentGatewayPort
+import com.example.template.application.port.PaymentIdempotencyKey
 import com.example.template.domain.error.OrderError
 import com.example.template.domain.shared.Money
 import com.example.template.domain.shared.OrderId
@@ -38,7 +39,8 @@ class ResilientPaymentGatewayAdapter(
     override suspend fun charge(
         orderId: OrderId,
         amount: Money,
-    ): Either<OrderError, PaymentCharge> = retrySchedule.retryEither { chargeOnce(orderId, amount) }
+        idempotencyKey: PaymentIdempotencyKey,
+    ): Either<OrderError, PaymentCharge> = retrySchedule.retryEither { chargeOnce(orderId, amount, idempotencyKey) }
 
     /**
      * サーキットブレーカーで1回分の呼び出しを保護する。
@@ -53,11 +55,12 @@ class ResilientPaymentGatewayAdapter(
     private suspend fun chargeOnce(
         orderId: OrderId,
         amount: Money,
+        idempotencyKey: PaymentIdempotencyKey,
     ): Either<OrderError, PaymentCharge> =
         Either
             .catch {
                 circuitBreaker.protectEither {
-                    delegate.charge(orderId, amount).getOrElse { error -> throw DelegateChargeFailed(error) }
+                    delegate.charge(orderId, amount, idempotencyKey).getOrElse { error -> throw DelegateChargeFailed(error) }
                 }
             }.fold(
                 { throwable -> Either.Left(throwable.toOrderError()) },

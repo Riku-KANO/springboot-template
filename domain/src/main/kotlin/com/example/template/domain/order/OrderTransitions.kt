@@ -53,6 +53,25 @@ fun Order.submitPayment(paidAt: Instant): Either<OrderError, Order> =
         copy(status = next)
     }
 
+/**
+ * 外部決済を呼ぶ前に、現在の状態が支払い可能であることを検証して請求額を返す。
+ * 状態検証を [submitPayment] より後に遅らせると、遷移不能な注文へ実際の請求を行い得るため、
+ * PayOrderService の準備フェーズからこの関数を使用する。
+ */
+fun Order.paymentDue(): Either<OrderError, Money> =
+    either {
+        when (status) {
+            is OrderStatus.Draft -> raise(OrderError.InvalidTransition(status, "submitPayment"))
+            is OrderStatus.PendingPayment -> total().mapLeft { OrderError.InvalidOrderLine(it.message) }.bind()
+            is OrderStatus.Paid -> raise(OrderError.InvalidTransition(status, "submitPayment"))
+            is OrderStatus.Fulfilling -> raise(OrderError.InvalidTransition(status, "submitPayment"))
+            is OrderStatus.Shipped -> raise(OrderError.InvalidTransition(status, "submitPayment"))
+            is OrderStatus.Delivered -> raise(OrderError.InvalidTransition(status, "submitPayment"))
+            is OrderStatus.Cancelled -> raise(OrderError.InvalidTransition(status, "submitPayment"))
+            is OrderStatus.Refunded -> raise(OrderError.InvalidTransition(status, "submitPayment"))
+        }
+    }
+
 /** Paid -> Fulfilling(startedAt)。倉庫でピッキング・梱包に着手した際に呼ぶ。 */
 fun Order.startFulfilling(startedAt: Instant): Either<OrderError, Order> =
     either {

@@ -3,7 +3,8 @@ package com.example.template.batch.settlement
 import com.example.template.application.port.SettlementFilePort
 import com.example.template.domain.settlement.SettlementRecord
 import kotlinx.coroutines.runBlocking
-import org.springframework.batch.infrastructure.item.ItemReader
+import org.springframework.batch.infrastructure.item.ExecutionContext
+import org.springframework.batch.infrastructure.item.ItemStreamReader
 import java.time.LocalDate
 
 /**
@@ -38,23 +39,39 @@ import java.time.LocalDate
 class SettlementRecordItemReader(
     private val settlementFilePort: SettlementFilePort,
     private val settlementDate: LocalDate,
-) : ItemReader<SettlementRecord> {
-    private var iterator: Iterator<SettlementRecord>? = null
+) : ItemStreamReader<SettlementRecord> {
+    private var records: List<SettlementRecord> = emptyList()
+    private var currentIndex: Int = 0
 
-    override fun read(): SettlementRecord? {
-        val records = iterator ?: loadAll().also { iterator = it }
-        return if (records.hasNext()) records.next() else null
+    override fun open(executionContext: ExecutionContext) {
+        records = loadAll()
+        currentIndex = executionContext.getInt(CURRENT_INDEX_KEY, 0)
     }
 
-    private fun loadAll(): Iterator<SettlementRecord> =
+    override fun read(): SettlementRecord? = records.getOrNull(currentIndex)?.also { currentIndex++ }
+
+    override fun update(executionContext: ExecutionContext) {
+        executionContext.putInt(CURRENT_INDEX_KEY, currentIndex)
+    }
+
+    override fun close() {
+        records = emptyList()
+        currentIndex = 0
+    }
+
+    private fun loadAll(): List<SettlementRecord> =
         runBlocking {
             settlementFilePort
                 .readRecordsFor(settlementDate)
                 .fold(
                     { error -> throw SettlementFileUnreadableException(settlementDate, error.message) },
-                    { records -> records.iterator() },
+                    { it },
                 )
         }
+
+    companion object {
+        private const val CURRENT_INDEX_KEY = "settlementRecordItemReader.currentIndex"
+    }
 }
 
 /**

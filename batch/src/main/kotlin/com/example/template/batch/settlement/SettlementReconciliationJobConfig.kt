@@ -11,6 +11,7 @@ import org.springframework.batch.core.repository.JobRepository
 import org.springframework.batch.core.step.Step
 import org.springframework.batch.core.step.builder.StepBuilder
 import org.springframework.batch.infrastructure.item.ItemReader
+import org.springframework.batch.infrastructure.item.ItemStreamReader
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -73,7 +74,7 @@ class SettlementReconciliationJobConfig(
     fun settlementRecordItemReader(
         settlementFilePort: SettlementFilePort,
         @Value("#{jobParameters['settlementDate']}") settlementDate: LocalDate,
-    ): ItemReader<SettlementRecord> = SettlementRecordItemReader(settlementFilePort, settlementDate)
+    ): ItemStreamReader<SettlementRecord> = SettlementRecordItemReader(settlementFilePort, settlementDate)
 
     companion object {
         private const val CHUNK_SIZE = 20

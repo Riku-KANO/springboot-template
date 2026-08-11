@@ -3,10 +3,12 @@ package com.example.template.batch.settlement
 import arrow.core.Either
 import com.example.template.domain.error.SettlementError
 import com.example.template.domain.settlement.ReconciliationOutcome
+import org.springframework.batch.core.configuration.annotation.StepScope
 import org.springframework.batch.core.listener.StepExecutionListener
 import org.springframework.batch.core.step.StepExecution
 import org.springframework.batch.infrastructure.item.Chunk
 import org.springframework.batch.infrastructure.item.ItemWriter
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
 import java.time.Clock
@@ -21,30 +23,20 @@ import java.time.OffsetDateTime
  * 「失敗」が例外ではなく型 (Either.Left) として表現されているため、そもそもステップの
  * 実行を中断させる例外自体が発生しないからである。
  *
- * ## 実行結果の集計について (StepExecutionListener を実装している理由)
- * SettlementJobListener (afterJob) は最終的に SettlementReport.summarize を使って
- * このジョブ全体のサマリを組み立てるが、そのためには全チャンク分の Either 結果のリストが要る。
- * Spring Batch の ExecutionContext (StepExecution/JobExecution に保持できる状態) は
- * JobRepository に永続化される = シリアライズされる前提の仕組みであり、
- * Either や SettlementError を含む任意長のリストをそこに詰めるのはシリアライズ経路的に
- * 適さない (Jackson 3 と AWS SDK 内蔵 Jackson 2 の混在などバージョン起因の問題も招きやすい)。
- * そのためこのリストは JVM 内で完結する単純なフィールドとして持ち、SettlementJobListener に
- * このインスタンスを直接注入して afterJob から参照してもらう設計にした。
- * beforeStep でリストをクリアするのは、同一 JVM 内でジョブが複数回実行された場合に
- * 前回実行分の結果が混入しないようにするため (このクラスは Spring のデフォルトスコープ =
- * シングルトンであるため、明示的にクリアしないと状態が残ってしまう)。
+ * Writer は StepScope とし、共有可変リストを持たない。各監査行へ jobInstanceId を記録し、
+ * JobListener はDBから集計する。これにより同一JVMでジョブが並行しても結果が混ざらず、
+ * 失敗後に別JobExecutionとして再開しても同じJobInstanceの結果を再利用できる。
  */
 @Component
+@StepScope
 class SettlementItemWriter(
     private val jdbcTemplate: JdbcTemplate,
+    @param:Value("#{jobInstanceId}") private val jobInstanceId: Long,
     private val clock: Clock = Clock.systemUTC(),
 ) : ItemWriter<Either<SettlementError, ReconciledSettlement>>,
     StepExecutionListener {
-    private val results = mutableListOf<Either<SettlementError, ReconciliationOutcome>>()
-
     override fun beforeStep(stepExecution: StepExecution) {
         SettlementBatchSchema.ensureCreated(jdbcTemplate)
-        results.clear()
     }
 
     override fun write(chunk: Chunk<out Either<SettlementError, ReconciledSettlement>>) {
@@ -52,18 +44,13 @@ class SettlementItemWriter(
             when (item) {
                 is Either.Right -> {
                     insertResult(item.value)
-                    results.add(Either.Right(item.value.outcome))
                 }
                 is Either.Left -> {
                     insertError(item.value)
-                    results.add(Either.Left(item.value))
                 }
             }
         }
     }
-
-    /** afterJob からこのステップで蓄積した全件の結果を参照するためのスナップショット。 */
-    fun snapshotResults(): List<Either<SettlementError, ReconciliationOutcome>> = results.toList()
 
     private fun insertResult(reconciled: ReconciledSettlement) {
         val (record, outcome) = reconciled
@@ -79,10 +66,12 @@ class SettlementItemWriter(
         jdbcTemplate.update(
             """
             INSERT INTO batch_settlement_results
-                (order_id, provider_transaction_id, settled_amount_minor, currency, settled_at,
+                (job_instance_id, order_id, provider_transaction_id, settled_amount_minor, currency, settled_at,
                  outcome, expected_amount_minor, actual_amount_minor, recorded_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (job_instance_id, provider_transaction_id) DO NOTHING
             """,
+            jobInstanceId,
             record.orderId.value,
             record.providerTransactionId,
             record.settledAmount.amount.value,
@@ -111,9 +100,10 @@ class SettlementItemWriter(
 
         jdbcTemplate.update(
             """
-            INSERT INTO batch_settlement_errors (order_id, error_type, message, recorded_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO batch_settlement_errors (job_instance_id, order_id, error_type, message, recorded_at)
+            VALUES (?, ?, ?, ?, ?)
             """,
+            jobInstanceId,
             orderId,
             errorType,
             error.message,

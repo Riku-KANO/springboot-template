@@ -5,6 +5,7 @@ import arrow.resilience.CircuitBreaker
 import arrow.resilience.Schedule
 import com.example.template.application.port.PaymentCharge
 import com.example.template.application.port.PaymentGatewayPort
+import com.example.template.application.port.PaymentIdempotencyKey
 import com.example.template.domain.error.OrderError
 import com.example.template.domain.order.OrderStatus
 import com.example.template.domain.shared.Money
@@ -30,13 +31,14 @@ class ResilientPaymentGatewayAdapterTest {
     private val orderId = OrderId.create("order-1").shouldBeRight()
     private val jpy: Currency = Currency.getInstance("JPY")
     private val money = Money(MoneyMinor.create(1_000).shouldBeRight(), jpy)
+    private val idempotencyKey = PaymentIdempotencyKey.forOrder(orderId)
 
     @Test
     fun `一時的な障害は指数バックオフでリトライされ最終的に成功する`() =
         runTest {
             val attempts = AtomicInteger(0)
             val flakyThenOk =
-                PaymentGatewayPort { _, _ ->
+                PaymentGatewayPort { _, _, _ ->
                     if (attempts.incrementAndGet() < 3) {
                         Either.Left(OrderError.PaymentGatewayUnavailable("temporarily down"))
                     } else {
@@ -45,7 +47,7 @@ class ResilientPaymentGatewayAdapterTest {
                 }
             val adapter = ResilientPaymentGatewayAdapter(flakyThenOk)
 
-            val result = adapter.charge(orderId, money).shouldBeRight()
+            val result = adapter.charge(orderId, money, idempotencyKey).shouldBeRight()
 
             assertEquals("txn-ok", result.providerTransactionId)
             assertEquals(3, attempts.get())
@@ -56,13 +58,13 @@ class ResilientPaymentGatewayAdapterTest {
         runTest {
             val attempts = AtomicInteger(0)
             val alwaysFailing =
-                PaymentGatewayPort { _, _ ->
+                PaymentGatewayPort { _, _, _ ->
                     attempts.incrementAndGet()
                     Either.Left(OrderError.PaymentGatewayUnavailable("permanently down"))
                 }
             val adapter = ResilientPaymentGatewayAdapter(alwaysFailing)
 
-            val error = adapter.charge(orderId, money).shouldBeLeftOfType<OrderError.PaymentGatewayUnavailable>()
+            val error = adapter.charge(orderId, money, idempotencyKey).shouldBeLeftOfType<OrderError.PaymentGatewayUnavailable>()
 
             assertEquals("permanently down", error.cause)
             // Schedule.recurs(3) は「初回 + 最大3回の追加リトライ」なので最大4回まで呼ばれる。
@@ -74,13 +76,13 @@ class ResilientPaymentGatewayAdapterTest {
         runTest {
             val attempts = AtomicInteger(0)
             val businessError =
-                PaymentGatewayPort { _, _ ->
+                PaymentGatewayPort { _, _, _ ->
                     attempts.incrementAndGet()
                     Either.Left(OrderError.InvalidTransition(from = OrderStatus.Draft, attempted = "charge"))
                 }
             val adapter = ResilientPaymentGatewayAdapter(businessError)
 
-            adapter.charge(orderId, money).shouldBeLeftOfType<OrderError.InvalidTransition>()
+            adapter.charge(orderId, money, idempotencyKey).shouldBeLeftOfType<OrderError.InvalidTransition>()
 
             assertEquals(1, attempts.get())
         }
@@ -90,7 +92,7 @@ class ResilientPaymentGatewayAdapterTest {
         runTest {
             val attempts = AtomicInteger(0)
             val alwaysFailing =
-                PaymentGatewayPort { _, _ ->
+                PaymentGatewayPort { _, _, _ ->
                     attempts.incrementAndGet()
                     Either.Left(OrderError.PaymentGatewayUnavailable("down"))
                 }
@@ -108,10 +110,13 @@ class ResilientPaymentGatewayAdapterTest {
                         ),
                 )
 
-            adapter.charge(orderId, money) // 1回目: delegate が失敗しサーキットが開く
+            adapter.charge(orderId, money, idempotencyKey) // 1回目: delegate が失敗しサーキットが開く
             val attemptsAfterFirstCall = attempts.get()
 
-            val secondError = adapter.charge(orderId, money).shouldBeLeftOfType<OrderError.PaymentGatewayUnavailable>()
+            val secondError =
+                adapter
+                    .charge(orderId, money, idempotencyKey)
+                    .shouldBeLeftOfType<OrderError.PaymentGatewayUnavailable>()
 
             assertEquals(attemptsAfterFirstCall, attempts.get(), "circuit が開いている間は delegate が呼ばれてはならない")
             assertEquals(true, secondError.cause.contains("circuit breaker"))

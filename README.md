@@ -112,6 +112,8 @@ curl -s http://localhost:8080/actuator/prometheus
 Swagger UI: `http://localhost:8080/swagger-ui.html`。より詳しい手順 (累積バリデーションの
 デモ、注文ライフサイクル一巡 [作成 → 確定 → 決済 → 出荷準備 → 出荷 → 配達 → 返金] のデモ、
 キャンセルのデモ) は [`docs/local-development.md`](docs/local-development.md) を参照してください。
+IDE や `.http` 対応クライアントから順に実行できるリクエスト集と、それに対応する消込 CSV は
+[`examples/`](examples/) にあります。
 
 ### 4. 消込バッチをワンショットで実行する
 
@@ -175,6 +177,7 @@ terraform validate
 | [`docs/how-to-use-this-template.md`](docs/how-to-use-this-template.md) | パッケージ名の変更、不要なサンプルの削除、初回デプロイ |
 | [`docs/adr/`](docs/adr/) | 9本の Architecture Decision Record |
 | [`docs/runbooks/settlement-batch.md`](docs/runbooks/settlement-batch.md) | 消込バッチの手動再実行、失敗時の調査手順 |
+| [`examples/`](examples/) | 実行可能な HTTP リクエスト集と消込 CSV |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | このテンプレート自体への contribution ガイド |
 | [`CHANGELOG.md`](CHANGELOG.md) | このテンプレートの変更履歴・既知の制約 |
 

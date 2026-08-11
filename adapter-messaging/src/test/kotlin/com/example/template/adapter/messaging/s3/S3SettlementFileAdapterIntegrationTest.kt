@@ -2,7 +2,6 @@ package com.example.template.adapter.messaging.s3
 
 import com.example.template.domain.error.SettlementError
 import com.example.template.domain.testfixtures.shouldBeLeftOfType
-import com.example.template.domain.testfixtures.shouldBeRight
 import io.awspring.cloud.autoconfigure.core.AwsAutoConfiguration
 import io.awspring.cloud.autoconfigure.core.CredentialsProviderAutoConfiguration
 import io.awspring.cloud.autoconfigure.core.RegionProviderAutoConfiguration
@@ -58,7 +57,7 @@ class S3SettlementFileAdapterIntegrationTest {
     }
 
     @Test
-    fun `S3上の消込ファイルを読み込みパースできた行だけをレコードとして返す`() =
+    fun `不正行を含む消込ファイルは欠落させず MalformedRecord を返す`() =
         runTest {
             val date = LocalDate.of(2026, 8, 5)
             val body =
@@ -69,12 +68,7 @@ class S3SettlementFileAdapterIntegrationTest {
                 ).joinToString("\n")
             s3Client.putObject({ it.bucket(BUCKET).key("settlements/2026-08-05.csv") }, RequestBody.fromString(body))
 
-            val records = adapter.readRecordsFor(date).shouldBeRight()
-
-            assertEquals(2, records.size)
-            assertEquals("order-1", records[0].orderId.value)
-            assertEquals("txn-1", records[0].providerTransactionId)
-            assertEquals("order-2", records[1].orderId.value)
+            adapter.readRecordsFor(date).shouldBeLeftOfType<SettlementError.MalformedRecord>()
         }
 
     @Test

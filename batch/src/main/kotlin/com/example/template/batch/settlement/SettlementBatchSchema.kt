@@ -22,6 +22,7 @@ object SettlementBatchSchema {
         """
         CREATE TABLE IF NOT EXISTS batch_settlement_results (
             id BIGSERIAL PRIMARY KEY,
+            job_instance_id BIGINT NOT NULL,
             order_id VARCHAR(64) NOT NULL,
             provider_transaction_id VARCHAR(128) NOT NULL,
             settled_amount_minor BIGINT NOT NULL,
@@ -30,7 +31,8 @@ object SettlementBatchSchema {
             outcome VARCHAR(32) NOT NULL,
             expected_amount_minor BIGINT,
             actual_amount_minor BIGINT,
-            recorded_at TIMESTAMP WITH TIME ZONE NOT NULL
+            recorded_at TIMESTAMP WITH TIME ZONE NOT NULL,
+            UNIQUE (job_instance_id, provider_transaction_id)
         )
         """
 
@@ -38,6 +40,7 @@ object SettlementBatchSchema {
         """
         CREATE TABLE IF NOT EXISTS batch_settlement_errors (
             id BIGSERIAL PRIMARY KEY,
+            job_instance_id BIGINT NOT NULL,
             order_id VARCHAR(64),
             error_type VARCHAR(32) NOT NULL,
             message VARCHAR(1000) NOT NULL,

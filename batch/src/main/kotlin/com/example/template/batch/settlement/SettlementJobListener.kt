@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.batch.core.BatchStatus
 import org.springframework.batch.core.job.JobExecution
 import org.springframework.batch.core.listener.JobExecutionListener
+import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
 import java.time.Clock
 
@@ -34,7 +35,7 @@ import java.time.Clock
  */
 @Component
 class SettlementJobListener(
-    private val settlementItemWriter: SettlementItemWriter,
+    private val jdbcTemplate: JdbcTemplate,
     private val taskCallbackPort: TaskCallbackPort,
     private val clock: Clock = Clock.systemUTC(),
 ) : JobExecutionListener {
@@ -49,7 +50,7 @@ class SettlementJobListener(
         runBlocking {
             val callbackResult =
                 if (jobExecution.status == BatchStatus.COMPLETED) {
-                    val report = SettlementReport.summarize(clock.instant(), settlementItemWriter.snapshotResults())
+                    val report = summarize(jobExecution)
                     taskCallbackPort.notifySuccess(taskToken, report)
                 } else {
                     val cause =
@@ -60,6 +61,36 @@ class SettlementJobListener(
 
             callbackResult.onLeft { error -> logger.error("failed to notify Step Functions of job outcome: {}", error) }
         }
+    }
+
+    private fun summarize(jobExecution: JobExecution): SettlementReport {
+        val jobInstanceId = jobExecution.jobInstance.instanceId
+        val counts =
+            jdbcTemplate
+                .query(
+                    """
+                    SELECT outcome, COUNT(*) AS count
+                    FROM batch_settlement_results
+                    WHERE job_instance_id = ?
+                    GROUP BY outcome
+                    """.trimIndent(),
+                    { resultSet, _ -> resultSet.getString("outcome") to resultSet.getInt("count") },
+                    jobInstanceId,
+                ).toMap()
+        val failed =
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM batch_settlement_errors WHERE job_instance_id = ?",
+                Int::class.java,
+                jobInstanceId,
+            ) ?: 0
+        return SettlementReport(
+            processedAt = clock.instant(),
+            matchedCount = counts["MATCHED"] ?: 0,
+            mismatchCount = counts["AMOUNT_MISMATCH"] ?: 0,
+            alreadySettledCount = counts["ALREADY_SETTLED"] ?: 0,
+            notSettleableCount = counts["ORDER_NOT_SETTLEABLE"] ?: 0,
+            failedCount = failed,
+        )
     }
 
     companion object {

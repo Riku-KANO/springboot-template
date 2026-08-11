@@ -19,11 +19,13 @@ import java.time.Instant
  * paidAt はこのポートが返す [PaymentCharge] の一部として決済プロバイダ側の確定時刻を採用する。
  * PayOrderService が自前の Clock で「今」を刻まないのは、決済完了時刻は決済プロバイダという
  * 外部システムの権威に委ねるべき情報であり、アプリケーションサーバーの時計とズレて良いものではないため。
+ * 実装は同じ [PaymentIdempotencyKey] の再送に対して、同じ請求結果を返さなければならない。
  */
 fun interface PaymentGatewayPort {
     suspend fun charge(
         orderId: OrderId,
         amount: Money,
+        idempotencyKey: PaymentIdempotencyKey,
     ): Either<OrderError, PaymentCharge>
 }
 

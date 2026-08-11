@@ -4,6 +4,10 @@
 Docker Desktop があれば、実 AWS アカウントに一切触れずにこのテンプレートの主要な機能
 (Web API, 消込バッチ, Step Functions 連携) を最後まで動かせる。
 
+以下の Web API 操作を `.http` ファイルから実行したい場合は
+[`examples/http/orders.http`](../examples/http/orders.http) を使える。消込バッチ用の注文準備と
+入力 CSV まで相互に整合する一式は [`examples/README.md`](../examples/README.md) を参照。
+
 ## 1. Postgres + LocalStack を起動する
 
 ```bash
@@ -36,7 +40,7 @@ docker compose -f docker/docker-compose.yml up -d
 
 `local` プロファイルは `template.security.permit-all=true` を設定しており、JWT 無しで
 全エンドポイントを叩ける (`bootstrap/.../config/LocalSecurityConfig.kt` 参照)。起動すると
-Flyway が7件のマイグレーション (Batch のメタデータ、注文version列を含む) を適用し、Netty が `8080` 番ポートで
+Flyway が9件のマイグレーション (Batchメタデータ、決済試行、消込冪等台帳を含む) を適用し、Netty が `8080` 番ポートで
 待ち受ける。
 
 ### 動作確認 (実際に検証済みのコマンドと応答)

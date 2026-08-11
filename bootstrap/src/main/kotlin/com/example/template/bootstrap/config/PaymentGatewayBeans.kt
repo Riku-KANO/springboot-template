@@ -1,12 +1,9 @@
-// beans { } の @Deprecated 抑制について: UseCaseBeans.kt 冒頭のコメントを参照。
-@file:Suppress("DEPRECATION")
-
 package com.example.template.bootstrap.config
 
 import com.example.template.adapter.messaging.resilience.ResilientPaymentGatewayAdapter
 import com.example.template.application.port.PaymentGatewayPort
 import com.example.template.bootstrap.paymentgateway.StubPaymentGatewayAdapter
-import org.springframework.context.support.beans
+import org.springframework.beans.factory.BeanRegistrarDsl
 
 /**
  * [PaymentGatewayPort] の Bean 登録。
@@ -21,9 +18,9 @@ import org.springframework.context.support.beans
  * スタブを包んでから `PaymentGatewayPort` として公開する。スタブ自身を独立した名前付き Bean として
  * 登録せず、無名のまま delegate 引数へ直接渡しているのは、「`PaymentGatewayPort` 型の Bean は
  * 常に1つだけ」という状態を保証するため — 2つ登録してしまうと、他の箇所 (config/UseCaseBeans.kt の
- * `PayOrderService` 等) が `ref<PaymentGatewayPort>()` を呼んだときに複数候補で解決に失敗する。
+ * `PayOrderService` 等) が `bean<PaymentGatewayPort>()` を呼んだときに複数候補で解決に失敗する。
  */
-fun paymentGatewayBeans() =
-    beans {
-        bean<PaymentGatewayPort> { ResilientPaymentGatewayAdapter(delegate = StubPaymentGatewayAdapter()) }
-    }
+class PaymentGatewayBeanRegistrar :
+    BeanRegistrarDsl({
+        registerBean<PaymentGatewayPort> { ResilientPaymentGatewayAdapter(delegate = StubPaymentGatewayAdapter()) }
+    })

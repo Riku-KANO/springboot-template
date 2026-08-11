@@ -35,7 +35,7 @@ import org.springframework.transaction.reactive.TransactionalOperator
  *
  * ##### `OrderRepositoryAdapter` と `R2dbcTxRunner` が同じ Bean を共有する仕組み
  * ここで作る Bean はデフォルトでシングルトンスコープなので、config/PersistenceBeans.kt の
- * `beans { }` DSL 内で `ref<TransactionalOperator>()` を (`OrderRepositoryAdapter` のコンストラクタと
+ * `BeanRegistrarDsl` 内で `bean<TransactionalOperator>()` を (`OrderRepositoryAdapter` のコンストラクタと
  * `R2dbcTxRunner` のコンストラクタで) 2回呼んでも、同一のインスタンスが解決される。
  */
 @Configuration

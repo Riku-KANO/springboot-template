@@ -1,0 +1,159 @@
+@baseUrl = http://localhost:8080
+@lifecycleOrderId = example-lifecycle-0001
+@cancelOrderId = example-cancel-0001
+@settlementOrderId = example-settlement-0001
+
+### Health check
+GET {{baseUrl}}/actuator/health
+
+### ライフサイクル example 用の注文を作成
+POST {{baseUrl}}/orders
+Content-Type: application/json
+X-Request-Id: example-create-lifecycle
+
+{
+  "orderId": "{{lifecycleOrderId}}",
+  "customerId": "customer-example-0001",
+  "currency": "JPY",
+  "lines": [
+    {
+      "sku": "SKU-EXAMPLE-001",
+      "quantity": 2,
+      "unitPriceMinor": 1500
+    }
+  ],
+  "address": {
+    "recipientName": "Taro Yamada",
+    "postalCode": "100-0001",
+    "prefecture": "Tokyo",
+    "city": "Chiyoda",
+    "addressLine1": "1-1-1 Marunouchi",
+    "addressLine2": null
+  }
+}
+
+### 注文を取得
+GET {{baseUrl}}/orders/{{lifecycleOrderId}}
+
+### 注文一覧の先頭ページを取得
+GET {{baseUrl}}/orders?limit=2
+
+### 決済待ちにする
+POST {{baseUrl}}/orders/{{lifecycleOrderId}}/submit
+
+### 支払済みにする
+POST {{baseUrl}}/orders/{{lifecycleOrderId}}/pay
+
+### 出荷準備を開始する
+POST {{baseUrl}}/orders/{{lifecycleOrderId}}/start-fulfillment
+
+### 出荷する
+POST {{baseUrl}}/orders/{{lifecycleOrderId}}/ship
+Content-Type: application/json
+
+{
+  "trackingNumber": "TRACK-EXAMPLE-0001"
+}
+
+### 配達済みにする
+POST {{baseUrl}}/orders/{{lifecycleOrderId}}/deliver
+
+### 返金済みにする
+POST {{baseUrl}}/orders/{{lifecycleOrderId}}/refund
+Content-Type: application/json
+
+{
+  "amountMinor": 3000,
+  "currency": "JPY"
+}
+
+### キャンセル example 用の注文を作成
+POST {{baseUrl}}/orders
+Content-Type: application/json
+
+{
+  "orderId": "{{cancelOrderId}}",
+  "customerId": "customer-example-0001",
+  "currency": "JPY",
+  "lines": [
+    {
+      "sku": "SKU-EXAMPLE-002",
+      "quantity": 1,
+      "unitPriceMinor": 2000
+    }
+  ],
+  "address": {
+    "recipientName": "Hanako Yamada",
+    "postalCode": "150-0002",
+    "prefecture": "Tokyo",
+    "city": "Shibuya",
+    "addressLine1": "2-2-2 Shibuya"
+  }
+}
+
+### 注文をキャンセルする
+POST {{baseUrl}}/orders/{{cancelOrderId}}/cancel
+Content-Type: application/json
+
+{
+  "reason": "customer requested"
+}
+
+### ID cursor を指定して次のページを取得する
+GET {{baseUrl}}/orders?after={{cancelOrderId}}&limit=2
+
+### 累積バリデーションの Problem Details を確認する
+POST {{baseUrl}}/orders
+Content-Type: application/json
+Accept-Language: ja
+
+{
+  "orderId": "",
+  "customerId": "",
+  "currency": "JPY",
+  "lines": [
+    {
+      "sku": "bad sku!!",
+      "quantity": -1,
+      "unitPriceMinor": 1500
+    }
+  ],
+  "address": {
+    "recipientName": "x",
+    "postalCode": "x",
+    "prefecture": "x",
+    "city": "x",
+    "addressLine1": "x"
+  }
+}
+
+### 日本語の Not Found Problem Details を確認する
+GET {{baseUrl}}/orders/example-order-not-found
+Accept-Language: ja
+
+### 消込 example 用の注文を作成
+POST {{baseUrl}}/orders
+Content-Type: application/json
+
+{
+  "orderId": "{{settlementOrderId}}",
+  "customerId": "customer-example-0002",
+  "currency": "JPY",
+  "lines": [
+    {
+      "sku": "SKU-SETTLEMENT-001",
+      "quantity": 2,
+      "unitPriceMinor": 1500
+    }
+  ],
+  "address": {
+    "recipientName": "Jiro Yamada",
+    "postalCode": "530-0001",
+    "prefecture": "Osaka",
+    "city": "Osaka",
+    "addressLine1": "3-3-3 Umeda"
+  }
+}
+
+### 消込可能な決済待ち状態にする（この後 examples/settlement/2026-08-06.csv を利用）
+POST {{baseUrl}}/orders/{{settlementOrderId}}/submit

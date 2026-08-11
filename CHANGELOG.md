@@ -47,8 +47,21 @@
 - **ドキュメント**: `README.md`, `docs/architecture.md`, `docs/arrow-style-guide.md`,
   `docs/testing-strategy.md`, `docs/local-development.md`, `docs/how-to-use-this-template.md`,
   `docs/runbooks/settlement-batch.md`, ADR 9本 (`docs/adr/0001`〜`0009`)。
+- **実行可能な example**: health check、注文ライフサイクル、キャンセル、cursor pagination、
+  累積バリデーション、日本語 Problem Details、消込用注文の準備をまとめた
+  `examples/http/orders.http` と、同じ注文 ID・金額でそのままバッチ入力に使える
+  `examples/settlement/2026-08-06.csv`。
 
 ### Fixed
+
+- **決済の二重請求耐性**: 外部ゲートウェイ呼び出しをDBトランザクション外へ分離し、
+  `payment_attempts` とプロバイダで共有する永続的な冪等キーを導入。状態遷移を請求前に検証し、
+  プロセス停止・通信切断・同時実行後の再試行を同一請求へ収束させた。
+- **消込の再実行安全性**: `provider_transaction_id` の受領台帳、SQS重複配送の正常化、
+  restartableなItemStreamReader、StepScope Writer、JobInstance単位のDB集計を導入。
+  不正CSV行を黙って破棄せずジョブ失敗として可視化するよう変更した。
+- **Spring 7 / アーキテクチャ検証**: 非推奨の `beans { }`/Initializerを
+  `BeanRegistrarDsl` + `@Import`へ移行し、ArchUnitの依存方向・循環fitness testを追加した。
 
 - **注文ライフサイクルの断絶**: `Order.create()` が返す初期状態 `Draft` から、`PayOrder`
   (前提 `PendingPayment`) や `ShipOrder` (前提 `Fulfilling`) が要求する状態へ到達する手段が

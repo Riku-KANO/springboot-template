@@ -128,7 +128,7 @@ optics は「テストの中だけで使われて誰にも実利用されない�
 
 ## 関数型 Bean 登録に教条的にならない
 
-`beans { }` DSL (`org.springframework.context.support.beans`) は `:bootstrap` の
+Spring 7 の `BeanRegistrarDsl` は `:bootstrap` の
 アノテーション無しクラス (ユースケース実装、ポート実装) の登録に使うが、Spring Security の
 `ServerHttpSecurity` DSL やデュアル DataSource 構成のように「フレームワークの流儀に従った方が
 得な箇所」では素直に `@Configuration` + `@Bean` を使う。このテンプレートは

@@ -96,6 +96,7 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-flyway")
 
     testImplementation("org.springframework.boot:spring-boot-starter-webflux-test")
+    testImplementation("com.tngtech.archunit:archunit:1.4.2")
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.testcontainers.junit.jupiter)
 }

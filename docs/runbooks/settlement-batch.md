@@ -23,9 +23,9 @@
 - `taskToken` を渡さなければ `SettlementJobListener.afterJob` はコールバックを一切行わず、
   ログと DB のテーブルだけで結果を確認する運用になる (Step Functions を経由しない手動実行の
   標準的なやり方)。
-- 同じ `settlementDate` で再実行しても、`batch_settlement_results`/`batch_settlement_errors`
-  への `INSERT` は毎回新しい行として追加される (upsert ではない)。過去の実行結果と混同しないよう、
-  `recorded_at` (書き込み時刻) で当該実行分を絞り込むこと。
+- 同じジョブパラメータは同一 `JobInstance` になり、完了済みならSpring Batchが再起動を拒否する。
+  意図的に別実行として再処理する場合だけ一意な `run.id` を追加する。監査行は
+  `job_instance_id` で実行単位に絞り込める。
 
 ### 本番相当環境 (ECS RunTask, Pattern B)
 
@@ -48,13 +48,13 @@ settlementDate=<date>`) を渡す。`taskToken` を渡さなければ通常の�
      失敗が1件以上あった** (`failedCount > 0`)。次節「errors テーブルを見る」に進む。
    - `SettlementHasDiscrepancies` (Succeed) の場合、失敗ではなく金額不一致
      (`mismatchCount > 0`)。バッチとしては正常終了であり、人手による消込確認が必要なだけ。
-2. **リプレイする。** このステートマシンは冪等な設計を前提にしていない
-   (同じ `settlementDate` を再実行すると `batch_settlement_results`/`batch_settlement_errors`
-   に重複行が増える)。起動そのものが失敗したケース (1.の1つ目) は単純に同じ `input`
+2. **リプレイする。** SQSの同一taskToken再配送は同じJobInstanceへ収束し、実行中/完了済みなら
+   重複起動として無視される。消込の正データは `provider_transaction_id` の受領台帳で冪等化される。
+   起動そのものが失敗したケース (1.の1つ目) は単純に同じ `input`
    (`{"settlementDate": "..."}`) で `start-execution` をやり直してよい。レコード単位の
    失敗があったケース (1.の2つ目) は、まず原因 (下記) を特定・修正してから再実行すること。
-   原因を直さずに再実行すると同じ失敗を繰り返すだけでなく、結果テーブルに重複した
-   実行履歴が積み上がる。
+   原因を直さずに再実行しても同じ失敗を繰り返すだけなので、先に修正すること。別taskTokenで
+   再実行した監査履歴は別 `job_instance_id` として意図的に保持される。
 
 ## 記録が errors テーブルに載ったときに見るところ
 

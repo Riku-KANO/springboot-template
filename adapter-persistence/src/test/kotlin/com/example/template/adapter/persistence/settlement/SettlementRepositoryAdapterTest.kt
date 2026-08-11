@@ -32,7 +32,7 @@ import java.util.UUID
  */
 class SettlementRepositoryAdapterTest : PostgresIntegrationTest() {
     private val orderRepository by lazy { OrderRepositoryAdapter(databaseClient, transactionalOperator) }
-    private val settlementRepository by lazy { SettlementRepositoryAdapter(databaseClient) }
+    private val settlementRepository by lazy { SettlementRepositoryAdapter(databaseClient, transactionalOperator) }
 
     private val jpy: Currency = Currency.getInstance("JPY")
 
@@ -154,5 +154,19 @@ class SettlementRepositoryAdapterTest : PostgresIntegrationTest() {
                         type to reason
                     }.awaitOneOrNull()
             assertEquals("CANCELLED" to "no longer needed", statusTypeAndReason)
+        }
+
+    @Test
+    fun `same provider transaction is recorded only once across retries`() =
+        runTest {
+            val orderId = persistOrder()
+            val record = sampleRecord(orderId)
+            val recordedAt = Instant.parse("2024-02-01T00:05:00Z")
+
+            settlementRepository.recordOutcome(record, ReconciliationOutcome.Matched, recordedAt).shouldBeRight()
+            settlementRepository.recordOutcome(record, ReconciliationOutcome.AlreadySettled, recordedAt).shouldBeRight()
+
+            assertEquals(1L, countRows("settlements", orderId))
+            assertEquals(0L, countRows("settlement_errors", orderId))
         }
 }

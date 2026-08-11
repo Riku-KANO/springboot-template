@@ -3,8 +3,12 @@ package com.example.template.application.testsupport
 import arrow.core.Either
 import arrow.core.right
 import com.example.template.application.port.OrderRepository
+import com.example.template.application.port.PaymentAttempt
+import com.example.template.application.port.PaymentAttemptRepository
+import com.example.template.application.port.PaymentAttemptStatus
 import com.example.template.application.port.PaymentCharge
 import com.example.template.application.port.PaymentGatewayPort
+import com.example.template.application.port.PaymentIdempotencyKey
 import com.example.template.application.port.SettlementRepository
 import com.example.template.application.port.TxRunner
 import com.example.template.domain.error.OrderError
@@ -64,13 +68,54 @@ class FakePaymentGatewayPort(
 ) : PaymentGatewayPort {
     var invocationCount: Int = 0
         private set
+    val receivedIdempotencyKeys = mutableListOf<PaymentIdempotencyKey>()
 
     override suspend fun charge(
         orderId: OrderId,
         amount: Money,
+        idempotencyKey: PaymentIdempotencyKey,
     ): Either<OrderError, PaymentCharge> {
         invocationCount++
+        receivedIdempotencyKeys += idempotencyKey
         return result
+    }
+}
+
+/** 永続的な決済処理状態を模倣するインメモリ実装。 */
+class FakePaymentAttemptRepository(
+    initial: PaymentAttempt? = null,
+) : PaymentAttemptRepository {
+    private val attempts = mutableMapOf<OrderId, PaymentAttempt>()
+
+    init {
+        initial?.let { attempts[it.orderId] = it }
+    }
+
+    override suspend fun findByOrderId(orderId: OrderId): Either<OrderError, PaymentAttempt?> = Either.Right(attempts[orderId])
+
+    override suspend fun findOrCreate(
+        orderId: OrderId,
+        idempotencyKey: PaymentIdempotencyKey,
+        amount: Money,
+    ): Either<OrderError, PaymentAttempt> {
+        val attempt = attempts.getOrPut(orderId) { PaymentAttempt(orderId, idempotencyKey, amount, PaymentAttemptStatus.Pending) }
+        return if (attempt.idempotencyKey == idempotencyKey && attempt.amount == amount) {
+            Either.Right(attempt)
+        } else {
+            Either.Left(OrderError.RepositoryUnavailable("idempotency key reused with different parameters"))
+        }
+    }
+
+    override suspend fun markSucceeded(
+        idempotencyKey: PaymentIdempotencyKey,
+        charge: PaymentCharge,
+    ): Either<OrderError, PaymentAttempt> {
+        val current =
+            attempts.values.singleOrNull { it.idempotencyKey == idempotencyKey }
+                ?: return Either.Left(OrderError.RepositoryUnavailable("payment attempt not found"))
+        val succeeded = current.copy(status = PaymentAttemptStatus.Succeeded(charge))
+        attempts[current.orderId] = succeeded
+        return Either.Right(succeeded)
     }
 }
 

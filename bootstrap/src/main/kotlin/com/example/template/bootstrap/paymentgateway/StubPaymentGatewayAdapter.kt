@@ -3,11 +3,13 @@ package com.example.template.bootstrap.paymentgateway
 import arrow.core.Either
 import com.example.template.application.port.PaymentCharge
 import com.example.template.application.port.PaymentGatewayPort
+import com.example.template.application.port.PaymentIdempotencyKey
 import com.example.template.domain.error.OrderError
 import com.example.template.domain.shared.Money
 import com.example.template.domain.shared.OrderId
 import java.time.Clock
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 実在の決済プロバイダを持たないこのテンプレートのための、常に成功する [PaymentGatewayPort] スタブ。
@@ -25,9 +27,16 @@ import java.util.UUID
 class StubPaymentGatewayAdapter(
     private val clock: Clock = Clock.systemUTC(),
 ) : PaymentGatewayPort {
+    private val charges = ConcurrentHashMap<PaymentIdempotencyKey, PaymentCharge>()
+
     override suspend fun charge(
         orderId: OrderId,
         amount: Money,
+        idempotencyKey: PaymentIdempotencyKey,
     ): Either<OrderError, PaymentCharge> =
-        Either.Right(PaymentCharge(paidAt = clock.instant(), providerTransactionId = "stub-${UUID.randomUUID()}"))
+        Either.Right(
+            charges.computeIfAbsent(idempotencyKey) {
+                PaymentCharge(paidAt = clock.instant(), providerTransactionId = "stub-${UUID.randomUUID()}")
+            },
+        )
 }

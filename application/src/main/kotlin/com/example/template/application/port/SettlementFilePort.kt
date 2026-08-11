@@ -10,10 +10,8 @@ import java.time.LocalDate
  * :adapter-persistence or 専用アダプタが S3 からの取得を担う (Chunk 3/5)。:application は
  * 「日付を渡すとレコードの一覧が返ってくる」ことしか知らず、S3 やファイルフォーマットの存在は知らない。
  *
- * 1行単位のパース失敗 ([SettlementError.MalformedRecord]) は [SettlementRecord.parse] が既に
- * 個々のレコード単位の Either として表現しているため、このポートは「アダプタが実際に読めた行だけ」を
- * List で返す設計にしている。ファイルそのものが取得できない (S3 オブジェクトが無い等) といった
- * より上位の障害は [SettlementError.InfrastructureFailure] として Left で返す。
+ * 1行でもパースできない場合は、黙って欠落させず [SettlementError.MalformedRecord] としてファイル
+ * 全体を Left にする。ファイルそのものが取得できない場合は [SettlementError.InfrastructureFailure]。
  */
 fun interface SettlementFilePort {
     suspend fun readRecordsFor(date: LocalDate): Either<SettlementError, List<SettlementRecord>>

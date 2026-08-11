@@ -11,7 +11,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer
 
 /**
  * 統合テストの共通基盤: PostgreSQL の Testcontainer を「テストスイート全体で1個だけ」起動し、
- * Flyway で本物のマイグレーション (V0〜V4) を空の DB に適用してから各テストへ渡す。
+ * Flyway で本物のマイグレーション (V0〜V8) を空の DB に適用してから各テストへ渡す。
  *
  * ##### シングルトンコンテナパターンを採用した理由
  * JUnit5 の `@Testcontainers` + `@Container` (companion object 上の static フィールド) を

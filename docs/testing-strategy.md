@@ -12,17 +12,20 @@
 に自前実装がある。他モジュールのテストは `testImplementation(testFixtures(project(":domain")))`
 でこれを再利用する。
 
-## テストの内訳 (160 件、0 failures)
+## テストの内訳 (168 件、0 failures)
 
 | モジュール | 件数 | 何を検証しているか |
 |---|---|---|
 | `:domain` | 48 | 値オブジェクトのスマートコンストラクタ、`OrderTransitions` の状態遷移 (`else` を書かないことで保証される網羅性)、`reconcile` の判定ロジック、`@optics` の Lens/Traversal |
-| `:application` | 46 | ユースケースのオーケストレーション、累積バリデーション、cursor pagination、注文ライフサイクル一巡 |
-| `:adapter-persistence` | 19 | R2DBC マッピング、楽観ロック、cursor検索、Flyway、`R2dbcTxRunner` のロールバック (Testcontainers Postgres) |
+| `:application` | 48 | ユースケースのオーケストレーション、決済冪等性、累積バリデーション、cursor pagination、注文ライフサイクル一巡 |
+| `:adapter-persistence` | 22 | R2DBC マッピング、決済試行/消込claim、楽観ロック、Flyway、`R2dbcTxRunner` のロールバック (Testcontainers Postgres) |
 | `:adapter-web` | 34 | 全HTTP契約、一覧の境界値、エラーマッピング、OAuth2 scope認可、`RequestIdWebFilter` |
 | `:adapter-messaging` | 10 | 必須設定の起動時validation、`SfnTaskCallbackAdapter`/`S3SettlementFileAdapter` (Testcontainers LocalStack) |
 | `:batch` | 2 | `settlementReconciliationJob` の end-to-end 実行 (Testcontainers Postgres) |
-| `:bootstrap` | 1 | composition rootを全て組み立て、実Postgresで起動・作成・参照するスモークテスト |
+| `:bootstrap` | 4 | ArchUnitの依存方向/循環ルールと、composition rootを実Postgresで起動するスモークテスト |
+
+加えて `:bootstrap` の `ArchitectureFitnessTest` がArchUnitで内向きの依存方向とslice間の
+非循環性を検証する。モジュールのビルド境界とbytecodeベースのfitness functionを併用する。
 
 ## 何が Spring コンテキストを必要とし、何が不要か
 
