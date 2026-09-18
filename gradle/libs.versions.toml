@@ -35,7 +35,7 @@ spotless = "8.9.0"
 
 # Spring Boot BOM とは独立して揃えておく必要があるテスト系バージョン
 # (:domain / :application は Spring BOM を一切導入しないため)
-junitBom = "6.0.3" # Spring Boot 4.1.0 が管理する junit-jupiter と同一バージョン
+junitBom = "6.1.3" # Spring Boot 4.1.0 が管理する junit-jupiter と同一バージョン
 kotlinxCoroutines = "1.10.2" # Spring Boot 4.1.0 が管理する kotlinx-coroutines と同一バージョン
 
 [libraries]
