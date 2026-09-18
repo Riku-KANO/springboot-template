@@ -25,7 +25,7 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v4
-      - run: ./gradlew classes testClasses --stacktrace
+      - run: ./gradlew classes testClasses --no-build-cache --rerun-tasks --stacktrace
       - uses: github/codeql-action/analyze@v3
 
   dependency-review:
