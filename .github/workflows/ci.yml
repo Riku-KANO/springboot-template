@@ -37,7 +37,7 @@ jobs:
           java-version: "17"
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
         with:
           # main への push 時だけキャッシュを書き込む。PR 側は読み取り専用にして
           # フォーク PR からのキャッシュ汚染を避ける (Gradle 公式アクションの推奨設定)。
