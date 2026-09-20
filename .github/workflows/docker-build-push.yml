@@ -78,7 +78,7 @@ jobs:
           upload-artifact: true
 
       - name: Scan image for high severity vulnerabilities
-        uses: anchore/scan-action@v6
+        uses: anchore/scan-action@v7
         with:
           image: ${{ steps.image.outputs.uri }}
           severity-cutoff: high
